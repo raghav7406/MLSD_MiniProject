@@ -18,21 +18,57 @@ class VectorStore:
             self.records = json.loads(self.path.read_text(encoding="utf-8"))
 
     def add_chunks(self, chunks: Iterable[Chunk]) -> None:
-        self.records = [{"text": c.text, "source": c.source, "page": c.page} for c in chunks]
+        self.records = [
+            {
+                "text": c.text,
+                "source": c.source,
+                "page": c.page,
+                "clause_id": c.clause_id,
+                "chunk_index": c.chunk_index,
+            }
+            for c in chunks
+        ]
 
     def persist(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.records, indent=2), encoding="utf-8")
 
-    def search(self, query: str, top_k: int = 4) -> list[Chunk]:
+    def search(self, query: str, top_k: int = 5) -> list[Chunk]:
         query_tokens = _tokens(query)
         scored = []
         for record in self.records:
             score = len(query_tokens & _tokens(record["text"]))
             if score:
-                scored.append((score, Chunk(record["text"], record["source"], record.get("page"))))
+                scored.append((
+                    score,
+                    Chunk(
+                        record["text"],
+                        record["source"],
+                        record.get("page"),
+                        record.get("clause_id"),
+                        record.get("chunk_index", 0),
+                    ),
+                ))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [chunk for _, chunk in scored[:top_k]]
 
-    def retrieve_corpus_clause(self, query: str, top_k: int = 4) -> list[Chunk]:
+    def lookup_clause(self, clause_id: str) -> list[Chunk]:
+        results = []
+        clause_lower = clause_id.lower()
+        for record in self.records:
+            rid = (record.get("clause_id") or "").lower()
+            text_lower = record["text"].lower()
+            if clause_lower in rid or clause_lower in text_lower:
+                results.append(
+                    Chunk(
+                        record["text"],
+                        record["source"],
+                        record.get("page"),
+                        record.get("clause_id"),
+                        record.get("chunk_index", 0),
+                    )
+                )
+        return results
+
+    def retrieve_corpus_clause(self, query: str, top_k: int = 5) -> list[Chunk]:
         return self.search(query, top_k)

@@ -2,24 +2,79 @@ services:
   app:
     build: .
     command: uvicorn src.services.api:app --host 0.0.0.0 --port 8000
-    ports: ["8000:8000"]
+    ports:
+      - "8000:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
       CELERY_ENABLED: "true"
-    depends_on: [redis]
+      RESULT_STORE_PATH: /app/data/results.json
+      QUARANTINE_PATH: /app/data/quarantine_records.json
+      FEEDBACK_PATH: /app/data/feedback.json
+      VECTOR_STORE_PATH: /app/data/vector_store.json
+    volumes:
+      - preauth_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   worker:
     build: .
-    command: celery -A src.services.worker.celery_app worker --loglevel=info
+    command: celery -A src.services.worker.celery_app worker --loglevel=info --concurrency=2
     environment:
       REDIS_URL: redis://redis:6379/0
       CELERY_ENABLED: "true"
-    depends_on: [redis]
+      RESULT_STORE_PATH: /app/data/results.json
+      QUARANTINE_PATH: /app/data/quarantine_records.json
+      VECTOR_STORE_PATH: /app/data/vector_store.json
+    volumes:
+      - preauth_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
   redis:
     image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   prometheus:
-    image: prom/prometheus
-    ports: ["9090:9090"]
-    volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    image: prom/prometheus:v2.47.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - app
+
   grafana:
-    image: grafana/grafana
-    ports: ["3000:3000"]
+    image: grafana/grafana:10.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana_datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./observability/grafana_dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./observability/grafana_dashboard.json:/etc/grafana/provisioning/dashboards/preauth_dashboard.json:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  preauth_data:
+  grafana_data:

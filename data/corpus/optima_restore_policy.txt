@@ -1,5 +1,66 @@
-Optima Restore Policy
+Optima Restore Health Insurance Policy
+Policy Document – Version 1.8
+Effective Date: 1 July 2024
+Insurer: Star Health and Allied Insurance Co. Ltd.
 
-Cataract surgery is covered after 24 months of continuous policy tenure under Code-Excl02. Treatment before completion of the waiting period is excluded.
+== Coverage Summary ==
 
-Eligible planned hospitalisation is payable up to the available sum insured. The insurer may request medical records when diagnosis or procedure details are incomplete.
+This policy provides coverage for in-patient hospitalisation, day-care procedures,
+pre and post hospitalisation expenses, and emergency ambulance charges.
+
+== In-Patient Hospitalisation ==
+
+Eligible planned hospitalisation is payable up to the available sum insured.
+The insurer may request medical records when diagnosis or procedure details
+are incomplete.
+
+Coverage includes room rent, surgeon fees, anaesthesia charges, medicines,
+diagnostic tests, ICU charges, and nursing expenses as per policy terms.
+
+== Cataract Surgery ==
+
+Cataract surgery is covered after 24 months of continuous policy tenure under
+Code-Excl02. Treatment before completion of the waiting period is excluded.
+
+The sub-limit for cataract surgery is INR 40,000 per eye under this policy.
+This includes the cost of intraocular lens (IOL), surgical charges, and
+related pre and post operative expenses.
+
+== Waiting Periods ==
+
+Initial waiting period of 30 days applies to all illnesses except accidental
+injuries.
+
+Specific disease waiting period of 24 months (Code-Excl02) applies to:
+cataract, hernia, joint replacement, piles, sinusitis, tonsillectomy,
+kidney stones, hydrocele, and other listed conditions.
+
+Pre-existing disease waiting period of 48 months (Code-Excl01) applies to
+all conditions existing before policy inception.
+
+== Exclusions ==
+
+Permanent exclusions include cosmetic surgery, dental treatment (non-accidental),
+obesity surgery, self-inflicted injuries, substance abuse treatment, and
+experimental procedures.
+
+== Room Rent ==
+
+Room rent eligibility is based on the elected room category:
+- General Ward: actual charges
+- Semi-Private: up to 1% of sum insured per day
+- Private: up to 2% of sum insured per day
+
+Proportionate deduction applies if a higher room category is used.
+
+== Restore Benefit ==
+
+If the sum insured is exhausted during the policy year, 100% of the base
+sum insured is automatically restored for claims arising from a different
+illness or injury.
+
+== Pre-Authorisation ==
+
+All planned hospitalisations require pre-authorisation. The insurer will
+respond within 24 hours for planned cases and 2 hours for emergencies.
+Emergency hospitalisation is covered subject to intimation within 24 hours.

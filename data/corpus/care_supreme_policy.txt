@@ -1,5 +1,175 @@
-Care Supreme Policy
+Care Supreme Health Insurance Policy
+Policy Document – Version 2.1
+Effective Date: 1 April 2024
+Insurer: Star Health and Allied Insurance Co. Ltd.
+
+TABLE OF CONTENTS
+Section 1: Definitions
+Section 2: In-Patient Hospitalisation Cover
+Section 3: Day-Care Procedures
+Section 4: Pre and Post Hospitalisation Expenses
+Section 5: Waiting Periods
+Section 6: Permanent Exclusions
+Section 7: Sub-Limits
+Section 8: Co-Payment and Deductibles
+Section 9: Pre-Existing Diseases
+Section 10: Claim Procedure and Pre-Authorisation
+Section 11: General Exclusions
+Section 12: Sum Insured and Restore Benefit
+
+== Section 1: Definitions ==
+
+1.1 "Insured Person" means the person named in the policy schedule who is covered under this policy.
+1.2 "Hospital" means any institution established for in-patient care and day-care treatment of illness and/or injuries that is registered with the local authority and supervised by a registered and qualified medical practitioner.
+1.3 "Hospitalisation" means admission to a hospital for a minimum of 24 consecutive hours for medically necessary treatment.
+1.4 "Day-Care Procedure" means a medical procedure or treatment that requires less than 24 hours of hospitalisation due to technological advances.
+1.5 "Pre-Existing Disease (PED)" means any condition, ailment, injury or disease that is diagnosed by a physician within 48 months before the policy start date or for which medical advice or treatment was recommended or received.
+1.6 "Network Hospital" means a hospital with a valid agreement with the insurer for cashless treatment.
+1.7 "Sum Insured" means the maximum liability of the insurer per policy year as specified in the policy schedule.
+1.8 "Medically Necessary" means treatment that is consistent with the diagnosis and is in accordance with standards of good medical practice.
+
+== Section 2: In-Patient Hospitalisation Cover ==
+
+2.1 The policy covers reasonable and medically necessary expenses incurred for in-patient hospitalisation including:
+(a) Room, boarding, and nursing expenses as per the room category elected;
+(b) Surgeon, anaesthetist, medical practitioner, consultants, and specialist fees;
+(c) Anaesthesia, blood, oxygen, operation theatre charges, surgical appliances, medicines and drugs, diagnostic materials, and X-ray;
+(d) Intensive Care Unit (ICU) charges.
+
+2.2 Room Rent Eligibility:
+- General Ward: covered up to the actual room rent charged by the hospital
+- Semi-Private Room: covered up to 1% of the sum insured per day
+- Private Room: covered up to 2% of the sum insured per day
+- ICU: covered up to actual charges, subject to maximum 5% of sum insured per day
+
+2.3 If the insured person opts for a room category higher than their eligible category, all associated charges (surgeon, nursing, consultation) shall be proportionally reduced.
+
+2.4 Emergency hospitalisation is covered subject to policy terms and the available sum insured. Pre-existing disease waiting periods and exclusions apply. Emergency treatment does not require prior authorisation if the insured is admitted to a network hospital, but intimation must be given within 24 hours.
+
+== Section 3: Day-Care Procedures ==
+
+3.1 The following day-care procedures are covered subject to the terms of the policy. Day-care procedures do not require 24-hour hospitalisation. Coverage is limited to the available sum insured or applicable sub-limits, whichever is lower.
+
+3.2 List of covered day-care procedures includes but is not limited to:
+- Cataract surgery (phacoemulsification, lens replacement) – subject to waiting period and sub-limit
+- Dialysis (haemodialysis and peritoneal dialysis)
+- Chemotherapy and radiotherapy
+- Lithotripsy (kidney stone treatment)
+- Tonsillectomy
+- Sinusitis surgery (FESS)
+- Dental surgery arising from accidental injury
+- Coronary angiography (diagnostic)
+- Hysteroscopy
+- Dilation and Curettage (D&C)
+- Fracture management including plastering
+- Hydrocele surgery
+- Arthroscopy
+- Colonoscopy (therapeutic)
+- Endoscopic procedures
+
+Refer to Appendix A (daycare_procedures.txt) for the complete list.
+
+== Section 4: Pre and Post Hospitalisation Expenses ==
+
+4.1 Pre-Hospitalisation: Medical expenses incurred up to 30 days before the date of admission for the same illness or injury are covered.
+4.2 Post-Hospitalisation: Medical expenses incurred up to 60 days after the date of discharge for the same illness or injury are covered.
+4.3 These expenses include consultation fees, diagnostic tests, medicines prescribed by the treating doctor, and follow-up procedures directly related to the hospitalisation.
+
+== Section 5: Waiting Periods ==
+
+5.1 Initial Waiting Period: No claim shall be payable for any illness contracted during the first 30 days from the policy commencement date. This exclusion does not apply to accidental injuries.
+
+5.2 Specific Disease Waiting Period (Code-Excl02): The following diseases and treatments are subject to a specific waiting period of 24 months from the date of policy commencement:
+(a) Cataract surgery (including phacoemulsification and lens implant)
+(b) Benign prostatic hypertrophy
+(c) Hernia (inguinal, umbilical, femoral, incisional)
+(d) Joint replacement surgery (hip and knee)
+(e) Fistula in ano
+(f) Piles and haemorrhoids
+(g) Sinusitis and related nasal surgery
+(h) Internal congenital diseases
+(i) Tonsillectomy and adenoidectomy
+(j) Kidney and ureteric stones (urolithiasis)
+(k) Fibromyoma and dysfunctional uterine bleeding
+(l) Hydrocele
+(m) Gastric and duodenal ulcer
+(n) Gout and rheumatism
+(o) Calculus diseases
+
+Claims during the specific waiting period (Code-Excl02) are not payable. The 24-month waiting period applies from the first policy inception date with continuous coverage.
 
 Hospitalisation for medically necessary cataract surgery is covered after the applicable waiting period. Code-Excl02: cataract surgery has a specific waiting period of 24 months from policy commencement. Claims during the waiting period are not payable.
 
-Emergency hospitalisation is covered subject to policy terms and the available sum insured. Pre-existing disease waiting periods and exclusions apply.
+5.3 Pre-Existing Disease Waiting Period (Code-Excl01): Any pre-existing disease shall be covered after a continuous waiting period of 48 months from the first policy inception date. The insured must declare all pre-existing conditions at the time of proposal.
+
+== Section 6: Permanent Exclusions ==
+
+6.1 The following are permanently excluded from coverage under this policy:
+(a) Cosmetic or aesthetic treatment unless required for reconstruction after an accident
+(b) Dental treatment and surgery unless arising from accidental bodily injury
+(c) Obesity-related surgery (bariatric surgery, liposuction)
+(d) Change-of-gender surgery and related treatment
+(e) Self-inflicted injuries and attempted suicide
+(f) Substance abuse and alcohol-related conditions
+(g) Treatment for infertility, assisted reproduction, IVF, and surrogacy
+(h) Congenital external defects or anomalies
+(i) War, invasion, nuclear contamination
+(j) Experimental or unproven treatment
+(k) Non-allopathic treatments unless specifically covered
+(l) Rest cures, rehabilitation, and respite care
+(m) Vitamins, supplements, and health foods unless prescribed for acute condition
+(n) Vaccination and immunisation (except for post-bite treatment)
+(o) Investigation and evaluation without diagnosis or symptoms
+(p) Hazardous activities and adventure sports injuries
+(q) Treatment taken outside India unless otherwise specified
+(r) Any treatment for correction of eyesight, spectacles, and contact lenses
+
+== Section 7: Sub-Limits ==
+
+7.1 Cataract Surgery Sub-Limit: The maximum amount payable for cataract surgery is INR 40,000 per eye, inclusive of lens cost, surgical charges, and pre/post hospitalisation expenses. This sub-limit applies irrespective of the sum insured.
+
+7.2 Room Rent Sub-Limit: Room rent is limited to 1% of the sum insured per day for semi-private accommodation, and 2% for private accommodation. If the insured uses accommodation exceeding the sub-limit, proportionate deduction applies to all related charges.
+
+7.3 Ambulance Charges: Ambulance expenses are payable up to INR 2,000 per hospitalisation.
+
+7.4 Modern Treatment Methods: Advanced treatments (robotic surgery, stem cell therapy, etc.) are payable up to 50% of the sum insured per policy year, subject to the terms of the policy.
+
+== Section 8: Co-Payment and Deductibles ==
+
+8.1 The insured shall bear a co-payment of 20% of all admissible claims if the insured person is above 60 years of age at the time of claim.
+8.2 For insured persons aged 60 and below, no co-payment applies for network hospital claims.
+8.3 A voluntary deductible of INR 10,000 or INR 25,000 may be selected at the time of purchase, which will reduce the premium proportionally.
+
+== Section 9: Pre-Existing Diseases ==
+
+9.1 All pre-existing diseases declared in the proposal form are covered after a waiting period of 48 months (Code-Excl01) from the first policy inception date, provided the policy has been continuously renewed without break.
+9.2 Non-disclosure of pre-existing conditions may result in rejection of claims or cancellation of the policy.
+9.3 Common pre-existing conditions include: diabetes mellitus, hypertension, thyroid disorders, asthma, chronic kidney disease, coronary artery disease, and epilepsy.
+
+== Section 10: Claim Procedure and Pre-Authorisation ==
+
+10.1 For cashless claims at network hospitals: The insured must obtain pre-authorisation from the insurer or its TPA before the planned procedure. Emergency admissions must be intimated within 24 hours.
+
+10.2 Pre-Authorisation Requirements:
+(a) Completed pre-authorisation request form
+(b) Valid policy details and member identification
+(c) Attending doctor's recommendation with diagnosis and proposed treatment
+(d) Estimated cost and duration of hospitalisation
+(e) Details of hospital and treating physician
+
+10.3 The insurer shall respond to the pre-authorisation request within 2 hours for emergency cases and 24 hours for planned procedures.
+
+10.4 For reimbursement claims: The insured must submit all original bills, discharge summary, investigation reports, and prescription within 15 days of discharge.
+
+== Section 11: General Exclusions ==
+
+11.1 Expenses incurred on services and treatment not related to the diagnosed condition.
+11.2 Charges for items of personal comfort (telephone, TV, toiletries, guest meals).
+11.3 Service charges, registration fees, and admission fees levied by the hospital.
+11.4 Any treatment for which the insured has received compensation from another source.
+
+== Section 12: Sum Insured and Restore Benefit ==
+
+12.1 The sum insured for this policy ranges from INR 5,00,000 to INR 1,00,00,000 as elected by the policyholder.
+12.2 Restore Benefit: If the entire sum insured is exhausted during the policy year, 100% of the base sum insured is automatically restored for subsequent claims, provided the subsequent claim is for a different illness or injury.
+12.3 No Claim Bonus: If no claim is made during a policy year, the sum insured is increased by 10% at renewal, up to a maximum of 50% of the original sum insured.

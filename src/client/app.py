@@ -39,10 +39,19 @@ if submitted:
                 time.sleep(1)
         if result["status"] == "SUCCESS":
             output = result["result"]
-            st.subheader(output["recommendation"])
-            st.write(output["reason"])
-            st.metric("Indicative limit", output["indicative_limit"])
-            st.json(output["citations"])
+            st.subheader(f"{output['recommendation']}  •  Route: {output.get('route', 'N/A')}")
+            if output.get("escalation_required"):
+                st.warning("⚠️ Escalation Required: Medical Review Needed")
+            st.write(f"**Reason:** {output['reason']}")
+            col1, col2 = st.columns(2)
+            col1.metric("Indicative Limit", f"₹{output['indicative_limit']:,.2f}")
+            col2.metric("Verification Status", "Passed" if output.get("verification_passed") else "Failed")
+            st.caption(f"Run ID: `{output.get('run_id', 'N/A')}`")
+            with st.expander("Policy Citations", expanded=True):
+                st.json(output.get("citations", []))
+            if output.get("step_timings"):
+                with st.expander("Execution Timings"):
+                    st.json(output["step_timings"])
         else:
             st.error("The request is still processing.")
     else:

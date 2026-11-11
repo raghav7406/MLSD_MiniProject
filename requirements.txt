@@ -7,3 +7,4 @@ pypdf>=4.0
 streamlit>=1.30
 locust>=2.25
 pytest>=8.0
+httpx>=0.27

@@ -1,0 +1,232 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "9.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"},
+    {"type": "panel", "id": "timeseries", "name": "Time series", "version": ""}
+  ],
+  "annotations": {"list": []},
+  "description": "Health Insurance Pre-Authorisation Desk – Operations Dashboard",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 20,
+      "title": "Throughput & Availability",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "reqps"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 1},
+      "id": 1,
+      "options": {"legend": {"displayMode": "list"}},
+      "targets": [
+        {
+          "expr": "sum(rate(preauth_requests_total[1m]))",
+          "legendFormat": "Requests/sec"
+        }
+      ],
+      "title": "Request Throughput (RPS)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 1},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(preauth_requests_total{status=\"success\"}[5m])) / sum(rate(preauth_requests_total[5m]))",
+          "legendFormat": "Success Rate"
+        }
+      ],
+      "title": "Availability (Success Rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 1},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(preauth_errors_total[5m])) / sum(rate(preauth_requests_total[5m]))",
+          "legendFormat": "Error Rate"
+        }
+      ],
+      "title": "Error Rate",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "id": 21,
+      "title": "Latency",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(preauth_request_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(preauth_request_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "title": "End-to-End Latency (p50 / p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+      "id": 5,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(preauth_step_latency_seconds_bucket[5m])) by (le, step))",
+          "legendFormat": "p95 {{step}}"
+        }
+      ],
+      "title": "Per-Step Latency (p95)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+      "id": 22,
+      "title": "Agent Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 19},
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(rate(preauth_escalations_total[5m]))",
+          "legendFormat": "Escalations/sec"
+        }
+      ],
+      "title": "Escalation Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 19},
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(rate(preauth_tool_calls_total[1m]))",
+          "legendFormat": "Tool Calls/sec"
+        }
+      ],
+      "title": "Tool Calls Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 19},
+      "id": 8,
+      "targets": [
+        {
+          "expr": "preauth_queue_depth",
+          "legendFormat": "Queue Depth"
+        }
+      ],
+      "title": "Queue Depth",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27},
+      "id": 23,
+      "title": "Reliability",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "mappings": [
+        {"options": {"0": {"text": "CLOSED"}, "1": {"text": "OPEN"}, "2": {"text": "HALF-OPEN"}}, "type": "value"}
+      ]}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 28},
+      "id": 9,
+      "targets": [
+        {"expr": "preauth_circuit_breaker_state", "legendFormat": "Circuit State"}
+      ],
+      "title": "Circuit Breaker State",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 28},
+      "id": 10,
+      "targets": [
+        {"expr": "sum(rate(preauth_retries_total[5m]))", "legendFormat": "Retries/sec"}
+      ],
+      "title": "Retry Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 28},
+      "id": 11,
+      "targets": [
+        {"expr": "preauth_worker_uptime_seconds", "legendFormat": "Worker Uptime"}
+      ],
+      "title": "Worker Uptime",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36},
+      "id": 24,
+      "title": "Cache",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37},
+      "id": 12,
+      "targets": [
+        {
+          "expr": "sum(rate(preauth_cache_hits_total[5m])) / (sum(rate(preauth_cache_hits_total[5m])) + sum(rate(preauth_cache_misses_total[5m])))",
+          "legendFormat": "Cache Hit Rate"
+        }
+      ],
+      "title": "Cache Hit Rate",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["preauth", "mlsd"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "PreAuth Desk Dashboard",
+  "uid": "preauth-desk-v2",
+  "version": 1
+}
+
