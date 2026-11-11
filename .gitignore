@@ -1,0 +1,7 @@
+.env
+_pycache_/
+*.pyc
+.venv/
+.pytest_cache/
+data/results.json
+data/quarantine_records.json
