@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    command: uvicorn src.services.api:app --host 0.0.0.0 --port 8000
+    ports: ["8000:8000"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_ENABLED: "true"
+    depends_on: [redis]
+  worker:
+    build: .
+    command: celery -A src.services.worker.celery_app worker --loglevel=info
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_ENABLED: "true"
+    depends_on: [redis]
+  redis:
+    image: redis:7-alpine
+  prometheus:
+    image: prom/prometheus
+    ports: ["9090:9090"]
+    volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+  grafana:
+    image: grafana/grafana
+    ports: ["3000:3000"]
