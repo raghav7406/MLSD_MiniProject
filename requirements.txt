@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+celery[redis]>=5.3
+prometheus-client>=0.20
+pypdf>=4.0
+streamlit>=1.30
+locust>=2.25
+pytest>=8.0
