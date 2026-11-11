@@ -1,0 +1,7 @@
+[
+  {"name": "cataract-before-waiting-period", "procedure_name": "Phacoemulsification", "diagnosis_name": "Cataract", "policy_tenure_months": 11, "expected": "REJECT"},
+  {"name": "cataract-after-waiting-period", "procedure_name": "Cataract surgery", "diagnosis_name": "Cataract", "policy_tenure_months": 24, "expected": "APPROVE"},
+  {"name": "emergency-admission", "procedure_name": "Emergency hospitalisation", "diagnosis_name": "Acute illness", "policy_tenure_months": 3, "expected": "APPROVE"},
+  {"name": "daycare-cataract-too-early", "procedure_name": "Lens replacement", "diagnosis_name": "Cataract", "policy_tenure_months": 0, "expected": "REJECT"},
+  {"name": "general-hospitalisation", "procedure_name": "Hospitalisation", "diagnosis_name": "Infection", "policy_tenure_months": 36, "expected": "APPROVE"}
+]
