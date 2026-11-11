@@ -1,0 +1,12 @@
+[
+  {
+    "text": "Care Supreme Policy\n\nHospitalisation for medically necessary cataract surgery is covered after the applicable waiting period. Code-Excl02: cataract surgery has a specific waiting period of 24 months from policy commencement. Claims during the waiting period are not payable.\n\nEmergency hospitalisation is covered subject to policy terms and the available sum insured. Pre-existing disease waiting periods and exclusions apply.",
+    "source": "care_supreme_policy.txt",
+    "page": null
+  },
+  {
+    "text": "Optima Restore Policy\n\nCataract surgery is covered after 24 months of continuous policy tenure under Code-Excl02. Treatment before completion of the waiting period is excluded.\n\nEligible planned hospitalisation is payable up to the available sum insured. The insurer may request medical records when diagnosis or procedure details are incomplete.",
+    "source": "optima_restore_policy.txt",
+    "page": null
+  }
+]
