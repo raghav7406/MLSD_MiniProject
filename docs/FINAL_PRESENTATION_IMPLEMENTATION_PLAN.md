@@ -1,5 +1,9 @@
 # Final Presentation Implementation Plan
 
+> Historical implementation plan. Use [REPORT.md](./REPORT.md) for current
+> completion status and [RUNBOOK.md](./RUNBOOK.md) for the current presentation
+> procedure.
+
 ## 1. Objective
 
 Bring the Health Insurance Pre-Authorisation Desk from its current working

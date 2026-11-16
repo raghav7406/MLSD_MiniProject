@@ -1,5 +1,9 @@
 # Implementation Plan: Health Insurance Pre-Authorisation Desk
 
+> Historical initial blueprint. It records the original target architecture;
+> current implementation status is in [REPORT.md](./REPORT.md), and executable
+> presentation steps are in [RUNBOOK.md](./RUNBOOK.md).
+
 This document serves as the step-by-step implementation blueprint for the MLSD Mini Project. AI coding agents should process these phases sequentially, verifying the functionality of each phase before proceeding to the next.
 
 ## Phase 1: Foundation & Data Contracts

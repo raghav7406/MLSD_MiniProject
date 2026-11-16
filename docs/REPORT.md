@@ -253,11 +253,11 @@ Largest cost driver if LLM added: prompt tokens at ~200 tokens/request × \$0.00
 | A4 async queue | FastAPI + Celery + local fallback | `test_api.py` submit/poll | ✅ |
 | A5 reliability | Circuit breaker + rate limiter + idempotency | `services/circuit_breaker.py`, `rate_limiter.py` | ✅ |
 | A6 agent metrics | Prometheus step_latency, escalation, tool_calls | Grafana dashboard | ✅ |
-| A7 scaling | `docker compose up --scale worker=3` | RUNBOOK §6 | ✅ |
+| A7 scaling | `docker compose up --scale worker=3` | RUNBOOK §7 | ✅ |
 | A8 web client | Streamlit `src/client/app.py` | UI demo | ✅ |
 | L1 retrieval/index | Token-overlap VectorStore + manifest | `test_ingestion.py` | ✅ |
 | L2 prompt versions | `prompts/v1_conservative.txt`, `v2_detailed.txt` | eval v1 vs v2 comparison | ✅ |
-| L3 evaluation | 25 cases, groundedness/faithfulness/hallucination | `results/evaluation_v1.json` | ✅ |
+| L3 evaluation | 25 cases, groundedness/faithfulness/hallucination | `results/evaluation.json` | ✅ |
 | L4 injection/output safety | `prompt_guard.py` + `filter_output` | `test_guardrails.py`, injection test | ✅ |
 | L5 token/cost tracking | `token_usage`, `cost_usd` in PreAuthResponse | Metadata in result JSON | ✅ |
 | L6 feedback/quality | `/api/v1/feedback` + `/api/v1/feedback/summary` | `test_api.py::TestFeedbackEndpoint` | ✅ |
@@ -266,7 +266,7 @@ Largest cost driver if LLM added: prompt tokens at ~200 tokens/request × \$0.00
 | D3 Compose | 5 services, health checks, volumes | `docker compose config` | ✅ |
 | D4 configuration hygiene | `.env.example`, `.gitignore`, no committed secrets | Repo scan | ✅ |
 | D5 tracing/reconstruction | `run_id` in every result + step_timings | `test_workflow.py::test_response_has_run_id` | ✅ |
-| D6 SLO/load test | SLO p95<2s declared; Locust profiles | RUNBOOK load testing commands | ✅ |
+| D6 SLO/load test | SLO p95<2s declared; Locust profiles | RUNBOOK §7 load-testing commands | ✅ |
 | D7 cache/rate limit | `cache.py` (5-min TTL) + `rate_limiter.py` (20/min) | `circuit_breaker.py`, cache_hits counter | ✅ |
-| D8 runbook/incident log | `RUNBOOK.md`, `INCIDENT_LOG.md` | Reviewer inspection | ✅ |
+| D8 runbook/incident log | `docs/RUNBOOK.md`, `INCIDENT_LOG.md` | Reviewer inspection | ✅ |
 

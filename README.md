@@ -49,6 +49,10 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/preauth/$taskId"
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (admin/admin) |
 
+For the complete presentation sequence, including all demo cases, polling,
+feedback, traces, evaluation, and load testing, see
+[docs/RUNBOOK.md](./docs/RUNBOOK.md#5-final-presentation-demo).
+
 ---
 
 ## Local Development
@@ -224,8 +228,12 @@ docker compose up --scale worker=3
 │   ├── test_ingestion.py          # Ingestion + retrieval tests
 │   ├── test_rate_limiter.py       # Rate limiter sliding window tests
 │   └── test_workflow.py           # End-to-end workflow tests
-├── REPORT.md                      # Final report
-├── RUNBOOK.md                     # Operations runbook
+├── docs/
+│   ├── REPORT.md                  # Final report
+│   ├── REVIEW_GUIDE.md            # Review and viva explanation
+│   ├── RUNBOOK.md                 # Operations and presentation runbook
+│   ├── TEAMMATE_2_DELIVERABLES.md # Evidence checklist and demo guide
+│   └── ...                        # Plans, presentation materials, and PDF
 ├── INCIDENT_LOG.md                # Development incident log
 ├── Dockerfile
 ├── docker-compose.yml
@@ -245,4 +253,4 @@ This is an academic prototype. Known limitations:
 - **No authentication** – rate limiting only; no JWT/API keys
 - **No OpenTelemetry tracing** – run_id-based log correlation instead
 
-See `REPORT.md` §11 for the full limitations table.
+See [docs/REPORT.md](./docs/REPORT.md) §11 for the full limitations table.

@@ -1,5 +1,9 @@
 # Agent Architecture Implementation Plan
 
+> Historical implementation plan. The current implementation and verified
+> evidence are documented in [REPORT.md](./REPORT.md), while live commands are
+> in [RUNBOOK.md](./RUNBOOK.md).
+
 ## 1. Objective
 
 Strengthen the current pre-authorisation workflow so that the agent

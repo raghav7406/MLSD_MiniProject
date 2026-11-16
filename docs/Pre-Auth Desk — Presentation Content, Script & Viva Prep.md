@@ -141,7 +141,7 @@ The brief asks for LangGraph/CrewAI, FAISS/Chroma, an LLM with a stub, TruLens a
 
 **Q4. Why these deployment boundaries (app, worker, redis, prometheus, grafana)?** The API and worker scale differently and fail independently: workers do the heavy work and can be scaled with --scale worker=3 without touching the API. Redis isolates the queue. Prometheus and Grafana are separate so monitoring survives an app crash.
 
-**Q5. What happens if the worker fails mid-run?** The task does not return a result, so the caller sees a non-success status rather than a confident answer. Execution bounds (10 steps, 20 tool calls, 30 s) end runaway runs by escalating. Check RUNBOOK.md and INCIDENT\_LOG.md and quote what they actually say.
+**Q5. What happens if the worker fails mid-run?** The task does not return a result, so the caller sees a non-success status rather than a confident answer. Execution bounds (10 steps, 20 tool calls, 30 s) end runaway runs by escalating. Check `RUNBOOK.md` and `../INCIDENT_LOG.md` and quote what they actually say.
 
 ### B. Agents and the brief's requirements
 
@@ -222,7 +222,7 @@ The assignment says that if the system does not start and serve a valid request 
 - [ ] Check wording consistency: the README example shows REJECT with route medical-review but escalation\_required false. Decide how you will explain that a rejection is routed to medical-review
 - [ ] Read prompts/v1\_conservative.txt, v2\_detailed.txt and the eval comparison so you can say exactly what was compared (Q10)
 - [ ] Read eval/evaluate\_rag.py so you can say how each of the 4 metrics is computed (Q19)
-- [ ] Open INCIDENT\_LOG.md and RUNBOOK.md and pick one real failure to narrate (Q25)
+- [ ] Open `../INCIDENT_LOG.md` and `RUNBOOK.md` and pick one real failure to narrate (Q25)
 - [ ] Be ready to say there is no toxicity detection, OpenTelemetry, TruLens, FAISS or LangGraph unless you can point to the code
 - [ ] Describe the workflow by responsibilities rather than node count: guardrails, clinical agent, coverage agent, verification, alternate-search retry, and final response
 
