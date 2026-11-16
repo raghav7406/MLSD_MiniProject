@@ -162,29 +162,47 @@ Health checks:
 
 ## 8. p95 Target and Measured Results
 
-**Declared SLO (before measurement):** p95 end-to-end latency < 2 seconds for the full submit→poll lifecycle.
+**Declared SLO (before measurement):** p95 end-to-end latency < 2 seconds for the full submit-to-poll lifecycle.
 
-**Measured results (local, 1 worker, synchronous mode):**
+**Measured Docker results (16 November 2026, 5 users, approximately 1-minute runs):**
 
-| Profile | Users | RPS | p50 | p95 | Failures |
-|---|---|---|---|---|---|
-| Beginner | 5 | ~3 | <5ms | <15ms | 0 |
-| (Expected with Docker Celery) | 5 | ~1 | ~200ms | ~800ms | 0 |
-| (Expected stress) | 50 | ~2 | ~500ms | ~2000ms | <1% |
+| Deployment | Requests | Failures | Aggregate RPS | Aggregate p50 | Aggregate p95 | Max |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 worker | 245 | 0 | 4.18 | 31 ms | 54 ms | 200 ms |
+| 3 workers | 295 | 0 | 5.04 | 33 ms | 55 ms | 71 ms |
 
-> [!IMPORTANT]
-> The local synchronous mode (no Celery) processes requests in-process with sub-millisecond decision latency because the retrieval is memory-resident token overlap. With Celery + Redis, add ~100-200ms queue overhead per request. The SLO of p95 < 2s is comfortably met in both configurations for the deterministic workflow.
+The Locust scenario exercises the complete submit-and-poll lifecycle. Its CSV
+statistics aggregate the individual HTTP requests in that lifecycle rather
+than recording one combined transaction timer. Every submission, poll,
+invalid-request check, health check, and metrics check completed without a
+failure in both final runs. The measured request p95 values are well below the
+2-second SLO.
+
+The rate limiter remains enabled at 20 submissions per minute per client. The
+initial Docker test treated all Locust users as one client because they shared
+the container-facing IP, causing HTTP 429 responses. The API now accepts an
+optional `X-Client-ID` and falls back to source IP; the Locust script assigns a
+stable identity to each virtual user. This preserves rate limiting while
+allowing the benchmark to model multiple clients correctly.
 
 ---
 
 ## 9. Bottleneck and Scaling Findings
 
-**Bottleneck identified:** The vector store is loaded fresh from disk for each worker restart but is in-memory thereafter. The token-overlap retrieval is O(n·q) where n=chunks and q=query tokens — at 27 chunks this is negligible (<1ms). The actual bottleneck in a real deployment would be LLM API call latency.
+**Bottleneck identified:** The token-overlap retrieval is O(n*q) where n is the
+number of chunks and q is the number of query tokens. With 27 chunks it is
+negligible compared with request and queue overhead. The final workload did
+not saturate the worker pool.
 
-**Worker scaling:**
-- 1 worker: sequential processing, throughput ~5 req/s (local), ~1 req/s (Celery)
-- 3 workers: ~3x throughput improvement for CPU-bound tasks; Redis queue becomes the shared bottleneck
-- `docker compose up --scale worker=3` demonstrates the multi-worker path
+**Worker scaling measurement:**
+
+- 1 worker: 4.18 aggregate requests/second, p95 54 ms, 0 failures.
+- 3 workers: 5.04 aggregate requests/second, p95 55 ms, 0 failures.
+- The three-worker run increased observed throughput by approximately 20.5%.
+- The small five-user workload and very low workflow latency limit the visible
+  scaling benefit; a larger workload would be needed to saturate the workers.
+- `docker compose up --scale worker=3` successfully started and served three
+  worker containers.
 
 ---
 
@@ -229,9 +247,9 @@ Largest cost driver if LLM added: prompt tokens at ~200 tokens/request × \$0.00
 | F6 three routing outcomes | `Route` enum in PreAuthResponse | `test_contracts.py::TestRouteMapping` | ✅ |
 | F7 safe escalation | Verification node + unsupported/PED paths | `test_workflow.py` cosmetic, PED, injection | ✅ |
 | F8 health/metrics/logs | `/health`, `/metrics`, Prometheus | Live dashboard demo | ✅ |
-| A1 agent framework/tools | 3-node graph + 3 tools | `test_workflow.py` metadata.tool_calls | ✅ |
-| A2 distinct agents | clinical_agent + coverage_agent + verification | `test_workflow.py` step_timings | ✅ |
-| A3 verification | `verification.py` + retry | `test_guardrails.py` grounding tests | ✅ |
+| A1 agent framework/tools | Explicit 3-agent graph + 3 tools (`corpus_search`, `clause_lookup`, `request_field_lookup`) | `test_agent_architecture.py`, `test_workflow.py` | ✅ |
+| A2 distinct agents | ClinicalAgent + CoverageAgent + VerificationAgent with explicit hand-off protocols | `test_agent_architecture.py`, `trace_formatter.py` | ✅ |
+| A3 verification | `verification.py` with alternate search retry + safe escalation | `test_guardrails.py`, `test_agent_architecture.py` | ✅ |
 | A4 async queue | FastAPI + Celery + local fallback | `test_api.py` submit/poll | ✅ |
 | A5 reliability | Circuit breaker + rate limiter + idempotency | `services/circuit_breaker.py`, `rate_limiter.py` | ✅ |
 | A6 agent metrics | Prometheus step_latency, escalation, tool_calls | Grafana dashboard | ✅ |

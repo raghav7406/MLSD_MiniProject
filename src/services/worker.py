@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -32,7 +33,19 @@ def _save(task_id: str, value: dict) -> None:
     RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
     records = json.loads(RESULT_PATH.read_text(encoding="utf-8")) if RESULT_PATH.exists() else {}
     records[task_id] = value
-    RESULT_PATH.write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=RESULT_PATH.parent,
+        prefix=f"{RESULT_PATH.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temporary:
+        json.dump(records, temporary, indent=2, default=str)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary_path = Path(temporary.name)
+    os.replace(temporary_path, RESULT_PATH)
 
 
 def _idempotency_key(payload: dict) -> str:

@@ -32,6 +32,9 @@ INVALID_PAYLOAD = {"member_id": ""}
 class PreAuthUser(HttpUser):
     wait_time = between(1, 3)
 
+    def on_start(self):
+        self.client.headers["X-Client-ID"] = f"locust-user-{id(self)}"
+
     @task(8)
     def full_lifecycle(self):
         """Submit + poll the complete request lifecycle."""

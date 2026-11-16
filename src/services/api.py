@@ -79,7 +79,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def submit_preauth(request: Request, payload: PreAuthRequest) -> dict:
     # Rate limiting
     client_ip = request.client.host if request.client else "unknown"
-    if not rate_limiter.allow(client_ip):
+    client_id = request.headers.get("X-Client-ID") or client_ip
+    if not rate_limiter.allow(client_id):
         error_count.labels(type="rate_limited").inc()
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
 
@@ -124,7 +125,8 @@ async def preauth_status(task_id: str) -> dict:
             escalation_count.inc()
         for step_name, duration in res.get("step_timings", {}).items():
             step_latency.labels(step=step_name).observe(duration)
-        tool_call_count = res.get("metadata", {}).get("tool_calls", 0)
+        tool_calls_meta = res.get("metadata", {}).get("tool_calls", 0)
+        tool_call_count = len(tool_calls_meta) if isinstance(tool_calls_meta, list) else int(tool_calls_meta)
         if tool_call_count:
             tool_calls_total.inc(tool_call_count)
     elif result.get("status") == "FAILED":

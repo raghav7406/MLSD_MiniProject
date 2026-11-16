@@ -13,4 +13,10 @@ build/
 .mypy_cache/
 .ruff_cache/
 results/
+.vscode/
+*.tmp
+*.temp
+.coverage
+coverage.xml
+htmlcov/
 *.log

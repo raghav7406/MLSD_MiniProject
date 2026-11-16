@@ -70,7 +70,7 @@ Client (Hospital System / Streamlit)
         │
         ▼
 FastAPI REST API (src/services/api.py)
-  ├── Rate Limiter (20 req/min)
+  ├── Rate Limiter (20 req/min per client; X-Client-ID or source IP)
   ├── Result Cache (5-min TTL)
   ├── Pydantic Validation → Quarantine (data/quarantine_records.json)
   └── Celery/Redis Queue ─────────────────────┐
@@ -149,11 +149,14 @@ Response:
 ## Testing and Evaluation
 
 ```powershell
-# Unit and API tests (56 tests)
+# Unit, API, and agent architecture tests (78 tests)
 python -m pytest -q
 
 # Evaluation suite (25 cases, 4 metrics)
 python -m eval.evaluate_rag --report results/evaluation.json
+
+# Live agent trace generator for presentation (5 canonical scenarios)
+python -m src.agents.trace_formatter
 
 # Load test
 locust -f load_test/locustfile.py --host http://localhost:8000 --headless -u 5 -r 1 -t 1m
@@ -193,9 +196,10 @@ docker compose up --scale worker=3
 │   │   ├── clinical_agent.py      # Classification node
 │   │   ├── coverage_agent.py      # Retrieval + decision node
 │   │   ├── verification.py        # Citation grounding node
-│   │   ├── graph.py               # Workflow orchestration
-│   │   ├── state.py               # AgentState TypedDict
-│   │   └── tools.py               # corpus_search, clause_lookup, field_lookup
+│   │   ├── graph.py               # Workflow orchestration & explicit routing
+│   │   ├── state.py               # AgentState TypedDict & data models
+│   │   ├── tools.py               # corpus_search, clause_lookup, field_lookup, execute_tool
+│   │   └── trace_formatter.py     # Live demonstration trace generator
 │   ├── client/
 │   │   └── app.py                 # Streamlit UI
 │   ├── guardrails/
@@ -213,10 +217,12 @@ docker compose up --scale worker=3
 │       └── worker.py              # Celery task + local fallback
 ├── tests/
 │   ├── conftest.py                # Temp-dir isolation fixture
+│   ├── test_agent_architecture.py # Agent boundaries, tools, and transition tests
 │   ├── test_api.py                # API endpoint tests
 │   ├── test_contracts.py          # Schema validation tests
 │   ├── test_guardrails.py         # Guardrail tests
 │   ├── test_ingestion.py          # Ingestion + retrieval tests
+│   ├── test_rate_limiter.py       # Rate limiter sliding window tests
 │   └── test_workflow.py           # End-to-end workflow tests
 ├── REPORT.md                      # Final report
 ├── RUNBOOK.md                     # Operations runbook

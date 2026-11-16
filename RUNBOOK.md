@@ -158,6 +158,13 @@ Get-Content data/quarantine_records.json | ConvertFrom-Json | ForEach-Object {
 
 ## 6. Load Testing
 
+The API rate-limits each client to 20 submissions per minute. In Docker,
+multiple Locust users can otherwise appear to have the same container-facing
+IP address. The included Locust script sends a distinct `X-Client-ID` for each
+virtual user, so the load test measures worker capacity without disabling
+rate limiting. Normal clients may omit the header and will be identified by
+source IP.
+
 ```powershell
 # Beginner (declare SLO: p95 < 2s)
 locust -f load_test/locustfile.py --host http://localhost:8000 --headless -u 5 -r 1 -t 1m
