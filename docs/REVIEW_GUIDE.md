@@ -107,8 +107,10 @@ The workflow exposes three callable retrieval-related tools:
 - clause lookup by identifier;
 - request-field lookup.
 
-The execution is bounded by step, tool-call, and wall-clock limits. An
-unverified result is downgraded to a query or medical-review route.
+The tools are executed through a centralized runner that records calls,
+enforces limits, and exposes timeout/failure outcomes. The execution is
+bounded by step, tool-call, and wall-clock limits. An unverified result is
+downgraded to a query or medical-review route.
 
 ---
 
@@ -123,7 +125,9 @@ unverified result is downgraded to a query or medical-review route.
 | [src/agents/coverage_agent.py](./src/agents/coverage_agent.py) | Performs policy retrieval and applies coverage rules |
 | [src/agents/verification.py](./src/agents/verification.py) | Checks grounding and decision consistency |
 | [src/agents/graph.py](./src/agents/graph.py) | Orchestrates the bounded workflow |
+| [src/agents/state.py](./src/agents/state.py) | Typed workflow state, tool-call records, hand-offs, and trace events |
 | [src/agents/tools.py](./src/agents/tools.py) | Retrieval and request-field tools |
+| [src/agents/trace_formatter.py](./src/agents/trace_formatter.py) | Generates presentation traces for canonical scenarios |
 | [src/guardrails/prompt_guard.py](./src/guardrails/prompt_guard.py) | Detects injection attempts and filters unsafe output |
 | [src/ingestion/ingest_pipeline.py](./src/ingestion/ingest_pipeline.py) | Builds the searchable policy store and index manifest |
 | [src/ingestion/vector_store.py](./src/ingestion/vector_store.py) | Deterministic token-overlap retrieval and clause lookup |
@@ -158,6 +162,10 @@ field-level error information. They do not start a workflow.
 Accepted requests receive task, run, and correlation identifiers. These
 identifiers connect the API response, worker result, metrics, and stored
 workflow metadata.
+
+The API also applies a five-minute result cache and a sliding-window limit of
+20 submissions per minute per client. Clients may provide `X-Client-ID`;
+otherwise the source IP is used.
 
 ### Step 3: Apply input guardrails
 
@@ -235,6 +243,9 @@ endpoint until the worker stores a completed result. The result includes:
 - step timings;
 - tool-call and token/cost metadata where applicable.
 
+Worker result writes use an atomic temporary-file replacement. This prevents a
+concurrent poll from reading a partially written JSON result.
+
 ---
 
 ## 5. Example Demonstration Cases
@@ -249,8 +260,7 @@ endpoint until the worker stores a completed result. The result includes:
 - retrieve the 24-month waiting-period evidence;
 - cite the relevant clause;
 - do not approve the request;
-- return the rejection/query/medical-review route defined by the response
-  contract.
+- return `REJECT` with the documented conservative route and citation.
 
 ### Case B: Cataract at 24 months
 
@@ -294,6 +304,14 @@ to override the policy rules.
 - the request is routed conservatively;
 - the system does not follow the injected instruction.
 
+### Case F: Verification failure and retry
+
+The presentation trace generator includes a controlled ungrounded-citation
+scenario. The verification agent detects the issue, performs an alternate
+search, and escalates if the result cannot be grounded. This demonstrates
+that verification is an active workflow transition rather than only a final
+boolean check.
+
 ---
 
 ## 6. Results Obtained
@@ -303,11 +321,13 @@ to override the policy rules.
 The repository currently reports:
 
 ```text
-56 passed in 2.05s
+78 passed
 ```
 
 The tests cover contracts, API behavior, quarantine, guardrails, ingestion,
-retrieval, workflow decisions, feedback, and escalation paths.
+retrieval, workflow decisions, feedback, escalation paths, agent boundaries,
+tool limits, verification retry, trace reconstruction, and per-client rate
+limiting.
 
 ### Evaluation suite
 
@@ -322,7 +342,7 @@ The fixed evaluation contains 25 cases:
 | Average faithfulness | 1.0 |
 | Average hallucination rate | 0.0 |
 | Average context relevance | 0.262 |
-| Average workflow latency | approximately 0.0029 seconds |
+| Average workflow latency | approximately 0.004 seconds |
 
 The generated result is stored in
 [results/evaluation.json](./results/evaluation.json).
@@ -362,7 +382,23 @@ The current implementation includes:
 - feedback endpoint and summary;
 - ingestion manifest;
 - Docker health checks;
-- runbook and incident log.
+- runbook and incident log;
+- presentation-ready traces for five canonical scenarios.
+
+### Measured Docker load results
+
+The final five-user Locust runs completed with zero failures:
+
+| Deployment | Requests | Failures | Aggregate RPS | p50 | p95 |
+|---|---:|---:|---:|---:|---:|
+| 1 worker | 245 | 0 | 4.18 | 31 ms | 54 ms |
+| 3 workers | 295 | 0 | 5.04 | 33 ms | 55 ms |
+
+The three-worker run produced approximately 20.5% higher observed throughput.
+The workload did not saturate the worker pool, so this is evidence of modest
+scaling under the tested workload, not a maximum-capacity claim. Locust
+statistics aggregate the individual HTTP requests in the submit-and-poll
+lifecycle rather than one combined end-to-end timer.
 
 ---
 
@@ -387,6 +423,7 @@ Open:
 ```powershell
 python -m pytest -q
 python -m eval.evaluate_rag --report results\evaluation.json
+python -m src.agents.trace_formatter
 ```
 
 ### Load-test path
@@ -403,8 +440,9 @@ For worker scaling:
 docker compose up --scale worker=3
 ```
 
-Measured load-test values should be recorded from the actual presentation
-machine. Estimates must be labelled as estimates, not measurements.
+The measured baseline and scaled results are documented in
+[REPORT.md](./REPORT.md). Re-run Locust if the presentation environment
+changes.
 
 ---
 
@@ -416,6 +454,11 @@ machine. Estimates must be labelled as estimates, not measurements.
 - Citation grounding is checked before returning an answer.
 - Invalid requests are quarantined before workflow execution.
 - The workflow is deterministic and reproducible.
+- The agent responsibilities, hand-offs, retries, and escalation paths are
+  explicit and test-covered.
+- Presentation traces make the workflow transitions inspectable during review.
+- The API preserves rate limiting while allowing distinct Docker load-test
+  clients through `X-Client-ID`.
 - The repository includes tests, evaluation data, deployment files, a report,
   runbook, and incident log.
 - The implementation is lightweight enough to run locally without paid model
@@ -433,8 +476,9 @@ machine. Estimates must be labelled as estimates, not measurements.
 - The corpus is limited and contains illustrative policy documents.
 - Results use JSON persistence rather than a production database.
 - OpenTelemetry export to Jaeger or Grafana Tempo is not implemented.
-- Actual Docker and multi-worker load results must be collected on the
-  presentation machine.
+- The recorded Docker and multi-worker results are measured evidence from the
+  tested environment; they should be re-run if the presentation machine or
+  workload changes.
 - Authentication and authorization are not implemented.
 
 These are appropriate topics for the “limitations and future work” portion of
@@ -456,7 +500,9 @@ should not be claimed as fully implemented requirements.
 > The key demonstration is cataract surgery after 11 months: although cataract
 > surgery is covered, the separate 24-month waiting-period clause prevents an
 > approval. Our 25-case evaluation passed all cases with groundedness and
-> faithfulness of 1.0 and zero measured hallucinations.
+> faithfulness of 1.0 and zero measured hallucinations. The implementation
+> also has explicit agent hand-offs, bounded tool execution, verification
+> retry, and measured Docker load-test evidence.
 
 ### If asked why no LangGraph or vector database is used
 
