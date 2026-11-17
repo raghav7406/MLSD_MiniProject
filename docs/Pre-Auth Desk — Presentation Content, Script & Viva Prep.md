@@ -38,7 +38,7 @@ Use these 11 slides (title + the 10 topics your brief listed). Everything below 
 ### Slide 5 — Architecture
 
 - Draw this: Client (Streamlit) → FastAPI (rate limit, cache, validation → quarantine) → Celery/Redis queue → Worker → Agent graph → results.json; Prometheus → Grafana beside it
-- Mark the deployment boundaries: app, worker, redis, prometheus, grafana (5 containers)
+- Mark the deployment boundaries: app, client, worker, redis, prometheus, grafana (6 containers)
 - Why async: runs are multi-step, so the API returns a task\_id immediately and the caller polls
 
 ### Slide 6 — Agent / workflow
@@ -101,7 +101,7 @@ About 680 words at a steady pace. Time marks are cumulative. Practise it once wi
 
 **Slide 4 (1:20)** Our solution works like a careful first-level desk assistant. It validates the request, classifies the treatment, searches the policy several times, applies the rules, checks its own evidence, and routes the case to one of three outcomes: approve-recommended, query-to-hospital, or medical-review. Every answer carries clause-level citations. And it only recommends. A medical officer always makes the final decision.
 
-**Slide 5 (2:00)** Architecture: a Streamlit client calls a FastAPI service, which does rate limiting, caching and validation. Invalid requests are quarantined. Valid ones go onto a Celery and Redis queue, and a worker runs the agent graph. We made it asynchronous because a run has several steps, so the API returns a task ID immediately and the client polls. Five containers, with Prometheus and Grafana for monitoring.
+**Slide 5 (2:00)** Architecture: a Streamlit client calls a FastAPI service, which does rate limiting, caching and validation. Invalid requests are quarantined. Valid ones go onto a Celery and Redis queue, and a worker runs the agent graph. We made it asynchronous because a run has several steps, so the API returns a task ID immediately and the client polls. Six containers, with Prometheus and Grafana for monitoring.
 
 **Slide 6 (2:30)** Inside the worker is a five-node workflow. Guardrails check for prompt injection. The clinical agent classifies the case. The coverage agent runs five retrieval passes using three tools, then applies the rules. The verification agent checks that every citation exists in the retrieved text, retries with a different query if not, and escalates if it still cannot support the answer. The loop is bounded: ten steps, twenty tool calls, thirty seconds.
 
@@ -229,7 +229,7 @@ The assignment says that if the system does not start and serve a valid request 
 ### Prepare the presentation
 
 - [ ] Build the 11 slides from Part 1 (or ask me to turn them into a deck later)
-- [ ] Draw the architecture diagram for slide 5 with the 5 containers marked
+- [ ] Draw the architecture diagram for slide 5 with the 6 containers marked
 - [ ] Rehearse the script in Part 2 out loud with a timer; aim for 4:45 to 5:00
 - [ ] Split speaking parts between teammates and decide who answers which viva group (A–E)
 - [ ] Re-read Part 4 questions Q6, Q7, Q9, Q10, Q14 and Q20 twice; these are the most likely hard ones

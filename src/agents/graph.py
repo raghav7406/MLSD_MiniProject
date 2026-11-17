@@ -16,6 +16,8 @@ Enforces:
 """
 from __future__ import annotations
 
+import logging
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +32,7 @@ from data_contracts import (
     recommendation_to_route,
 )
 
+from src.observability.tracing import record_exception, trace_span
 from .clinical_agent import ClinicalAgent, classify_clinical_request
 from .coverage_agent import CoverageAgent, verify_coverage
 from .state import AgentState, TraceEvent
@@ -117,6 +120,14 @@ def route_after_verification(state: AgentState) -> Literal["final_response", "al
 
 def run_workflow(request: PreAuthRequest, run_id: str | None = None, prompt_version: str = "v1") -> PreAuthResponse:
     """Execute the multi-agent decision workflow graph."""
+    runtime = os.getenv("AGENT_RUNTIME", "legacy").lower().strip()
+    if runtime == "langgraph":
+        try:
+            from .langgraph_runtime import run_langgraph_workflow
+            return run_langgraph_workflow(request, run_id=run_id, prompt_version=prompt_version)
+        except Exception as exc:
+            logging.getLogger("preauth.graph").warning("LangGraph runtime error: %s; falling back to legacy", exc)
+
     run_id = run_id or str(uuid.uuid4())
     start_time = time.time()
 
@@ -146,6 +157,12 @@ def run_workflow(request: PreAuthRequest, run_id: str | None = None, prompt_vers
         "has_pre_existing": False,
         "current_agent": "Workflow Coordinator",
         "current_status": "INITIALIZED",
+    }
+
+    workflow_attrs = {
+        "preauth.run_id": run_id,
+        "preauth.correlation_id": run_id,
+        "preauth.agent": "workflow_coordinator",
     }
 
     try:

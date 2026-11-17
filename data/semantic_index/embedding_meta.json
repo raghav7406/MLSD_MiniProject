@@ -1,0 +1,5 @@
+{
+  "model_name": "local-tfidf-semantic-v1",
+  "dimension": 512,
+  "is_fitted": true
+}

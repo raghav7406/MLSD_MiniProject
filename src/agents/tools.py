@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from src.ingestion.vector_store import VectorStore
+from src.observability.tracing import record_exception, trace_span
 
 _store: VectorStore | None = None
 _simulated_failure: dict[str, str] = {}
@@ -60,6 +61,8 @@ def corpus_search(query: str, top_k: int = 5, timeout_seconds: float = 5.0) -> l
             "source": r.source,
             "page": r.page,
             "clause_id": r.clause_id,
+            "similarity_score": getattr(r, "similarity_score", None),
+            "retrieval_mode": getattr(r, "retrieval_mode", "lexical"),
             "duration": round(duration, 4),
         }
         for r in results
@@ -84,7 +87,14 @@ def clause_lookup(clause_id: str, timeout_seconds: float = 5.0) -> list[dict]:
         raise TimeoutError(f"clause_lookup timed out after {duration:.2f}s (limit: {timeout_seconds}s)")
 
     return [
-        {"text": r.text, "source": r.source, "page": r.page, "clause_id": r.clause_id}
+        {
+            "text": r.text,
+            "source": r.source,
+            "page": r.page,
+            "clause_id": r.clause_id,
+            "similarity_score": getattr(r, "similarity_score", 1.0),
+            "retrieval_mode": getattr(r, "retrieval_mode", "exact_lookup"),
+        }
         for r in results
     ]
 
@@ -146,21 +156,34 @@ def execute_tool(
     success = True
     error_msg: str | None = None
 
-    try:
-        if tool_name == "corpus_search":
-            top_k = kwargs.get("top_k", 5)
-            results = corpus_search(query_or_arg, top_k=top_k, timeout_seconds=timeout_seconds)
-        elif tool_name == "clause_lookup":
-            results = clause_lookup(query_or_arg, timeout_seconds=timeout_seconds)
-        elif tool_name == "request_field_lookup":
-            val = request_field_lookup(state, query_or_arg)
-            results = [{"field": query_or_arg, "value": val}] if val is not None else []
-        else:
-            raise ValueError(f"Unknown tool: {tool_name}")
-    except Exception as exc:
-        success = False
-        error_msg = str(exc)
-        results = []
+    span_name = f"preauth.tool.{tool_name}"
+    span_attrs = {
+        "preauth.tool": tool_name,
+        "preauth.run_id": run_id,
+        "preauth.correlation_id": state.get("correlation_id", run_id),
+    }
+
+    with trace_span(span_name, attributes=span_attrs) as span:
+        try:
+            if tool_name == "corpus_search":
+                top_k = kwargs.get("top_k", 5)
+                results = corpus_search(query_or_arg, top_k=top_k, timeout_seconds=timeout_seconds)
+                if results and "retrieval_mode" in results[0]:
+                    span.set_attribute("preauth.retrieval_mode", results[0]["retrieval_mode"])
+            elif tool_name == "clause_lookup":
+                results = clause_lookup(query_or_arg, timeout_seconds=timeout_seconds)
+                if results and "retrieval_mode" in results[0]:
+                    span.set_attribute("preauth.retrieval_mode", results[0]["retrieval_mode"])
+            elif tool_name == "request_field_lookup":
+                val = request_field_lookup(state, query_or_arg)
+                results = [{"field": query_or_arg, "value": val}] if val is not None else []
+            else:
+                raise ValueError(f"Unknown tool: {tool_name}")
+        except Exception as exc:
+            success = False
+            error_msg = str(exc)
+            results = []
+            record_exception(span, exc)
 
     duration = time.time() - start
 

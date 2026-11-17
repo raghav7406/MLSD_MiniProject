@@ -414,6 +414,7 @@ Invoke-RestMethod http://localhost:8000/health
 
 Open:
 
+- Streamlit demo UI: `http://localhost:8501`
 - Swagger: `http://localhost:8000/docs`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`

@@ -1,0 +1,957 @@
+diff --git a/Dockerfile b/Dockerfile
+index 84a6e81..85c75f3 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -6,7 +6,10 @@ RUN pip install --no-cache-dir -r requirements.txt
+ 
+ COPY . .
+ 
+-# Run ingestion at build time so the vector store is ready
++# Cache the embedding model inside the image (outside the /app/data volume) so containers never download it at runtime
++ENV FASTEMBED_CACHE_PATH=/app/.fastembed_cache
++
++# Run ingestion at build time: downloads the model, embeds the corpus, builds the vector store
+ RUN python -m src.ingestion.ingest_pipeline --force
+ 
+ EXPOSE 8000
+diff --git a/README.md b/README.md
+index 528dbaf..5ffe679 100644
+--- a/README.md
++++ b/README.md
+@@ -65,6 +65,31 @@ uvicorn src.services.api:app --reload
+ streamlit run src/client/app.py
+ ```
+ 
++The first ingestion downloads the embedding model (BAAI/bge-small-en-v1.5, ~130 MB) and caches it.
++Ingestion fails loudly if the model cannot be loaded. To work offline with keyword-only (BM25) retrieval,
++set `RAG_EMBEDDING_BACKEND=none` (PowerShell: `$env:RAG_EMBEDDING_BACKEND="none"`).
++
++After changing the embedding model or switching the backend, re-run ingestion; `docker compose down -v`
++also clears a stale vector store held in the `preauth_data` volume.
++
++---
++
++## Retrieval (RAG)
++
++Policy chunks are embedded locally with fastembed (ONNX, no PyTorch). Each query runs two rankings:
++dense cosine similarity over the embeddings, and BM25 over the text. They are merged with Reciprocal Rank Fusion.
++Hybrid is used because policy text relies on exact identifiers (`Code-Excl02`) that embeddings blur, while
++keyword search misses paraphrases. `clause_lookup` stays an exact match.
++
++| Variable | Default | Purpose |
++| --- | --- | --- |
++| `RAG_EMBEDDING_BACKEND` | `fastembed` | `none` = BM25 only |
++| `RAG_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | any fastembed text model |
++| `RAG_MIN_SIMILARITY` | `0` | dense hits must score strictly above this |
++| `FASTEMBED_CACHE_PATH` | fastembed default | model cache directory |
++
++`python -m eval.evaluate_rag` reports `retrieval_mode` (`hybrid` or `lexical`) and `avg_expected_passage_recall`.
++
+ ---
+ 
+ ## Architecture
+@@ -210,7 +235,8 @@ docker compose up --scale worker=3
+ │   │   └── prompt_guard.py        # Injection detection, output filter, grounding
+ │   ├── ingestion/
+ │   │   ├── chunker.py             # Text splitting + clause_id extraction
+-│   │   ├── vector_store.py        # Token-overlap search + clause lookup
++│   │   ├── embedder.py            # fastembed wrapper (RAG_EMBEDDING_BACKEND)
++│   │   ├── vector_store.py        # BM25 + embeddings hybrid search (RRF) + clause lookup
+ │   │   └── ingest_pipeline.py     # CLI ingestor with manifest + idempotency
+ │   └── services/
+ │       ├── api.py                 # FastAPI endpoints + Prometheus
+@@ -246,7 +272,7 @@ docker compose up --scale worker=3
+ 
+ This is an academic prototype. Known limitations:
+ 
+-- **Token-overlap retrieval** (not semantic) – may miss paraphrased policy text
++- **Small embedding model, no reranker** – hybrid retrieval handles paraphrases, but there is no cross-encoder reranking step
+ - **Deterministic rules only** – no LLM for free-text ambiguity
+ - **In-process result store** – not durable across restarts (mitigated by JSON file)
+ - **Simplified policy corpus** – 2 policy documents, illustrative clauses only
+diff --git a/eval/evaluate_rag.py b/eval/evaluate_rag.py
+index 1def713..61fe61c 100644
+--- a/eval/evaluate_rag.py
++++ b/eval/evaluate_rag.py
+@@ -17,6 +17,7 @@ from pathlib import Path
+ 
+ from data_contracts import AdmissionType, PreAuthRequest
+ from src.agents.graph import run_workflow
++from src.agents.tools import _get_store
+ 
+ 
+ def _build_request(case: dict) -> PreAuthRequest | None:
+@@ -88,6 +89,8 @@ def evaluate(
+     total_faithfulness = 0.0
+     total_hallucination = 0.0
+     total_latency = 0.0
++    total_passage_recall = 0.0
++    recall_cases = 0
+     valid_cases = 0
+ 
+     for case in cases:
+@@ -160,6 +163,8 @@ def evaluate(
+                     found.append(passage.lower() in all_text)
+                 case_result["expected_passages_found"] = sum(found)
+                 case_result["expected_passages_total"] = len(case["expected_passages"])
++                total_passage_recall += sum(found) / len(found)
++                recall_cases += 1
+ 
+         except Exception as e:
+             case_result["actual"] = "ERROR"
+@@ -179,10 +184,12 @@ def evaluate(
+         "accuracy": round(passed / total, 3) if total else 0.0,
+         "avg_groundedness": round(total_groundedness / n, 3),
+         "avg_context_relevance": round(total_context_relevance / n, 3),
++        "avg_expected_passage_recall": round(total_passage_recall / max(recall_cases, 1), 3),
+         "avg_faithfulness": round(total_faithfulness / n, 3),
+         "avg_hallucination_rate": round(total_hallucination / n, 3),
+         "avg_latency_seconds": round(total_latency / n, 4),
+         "total_latency_seconds": round(total_latency, 3),
++        "retrieval_mode": _get_store().retrieval_mode,  # "hybrid" = RAG, "lexical" = keyword fallback
+     }
+ 
+     report = {"summary": summary, "results": results}
+diff --git a/requirements.txt b/requirements.txt
+index 9a7c7be..34921f3 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -8,3 +8,5 @@ streamlit>=1.30
+ locust>=2.25
+ pytest>=8.0
+ httpx>=0.27
++fastembed>=0.5
++numpy>=1.26
+diff --git a/src/agents/coverage_agent.py b/src/agents/coverage_agent.py
+index ca0556e..61926ba 100644
+--- a/src/agents/coverage_agent.py
++++ b/src/agents/coverage_agent.py
+@@ -63,11 +63,16 @@ class CoverageAgent:
+             state.setdefault("step_timings", {})["coverage_verification"] = round(time.time() - start, 4)
+             return state
+ 
++        # Semantic retrieval works best with a natural-language question about *this* request,
++        # not a bag of keywords. The category (e.g. "cataract surgery") bridges clinical terms
++        # such as "Phacoemulsification" to the policy's own vocabulary.
++        topic = f"{request.procedure_name} for {request.diagnosis_name} ({category})"
++
+         # --- Tool Call 1: Base coverage retrieval ---
+         base_call = execute_tool(
+             state,
+             "corpus_search",
+-            f"{request.policy_name} {category} coverage hospitalisation",
++            f"Is {topic} covered as in-patient hospitalisation under the {request.policy_name} policy?",
+             purpose=f"Retrieve base hospitalisation clauses for {category}",
+             top_k=5,
+         )
+@@ -79,7 +84,7 @@ class CoverageAgent:
+         excl_call = execute_tool(
+             state,
+             "corpus_search",
+-            f"{category} waiting period exclusion Code-Excl02",
++            f"Waiting period or permanent exclusion that applies to {topic}",
+             purpose=f"Retrieve exclusion & waiting period clauses for {category}",
+             top_k=5,
+         )
+@@ -91,7 +96,7 @@ class CoverageAgent:
+         sub_call = execute_tool(
+             state,
+             "corpus_search",
+-            f"{category} sub-limit room rent cataract per eye",
++            f"Sub-limits, room rent limits and co-payment that apply to {topic}",
+             purpose=f"Retrieve sub-limit provisions for {category}",
+             top_k=3,
+         )
+@@ -106,7 +111,7 @@ class CoverageAgent:
+             dc_call = execute_tool(
+                 state,
+                 "corpus_search",
+-                f"{request.procedure_name} day-care procedure list",
++                f"Is {request.procedure_name} listed as a day-care procedure?",
+                 purpose=f"Verify {request.procedure_name} against day-care procedure schedule",
+                 top_k=3,
+             )
+@@ -126,14 +131,21 @@ class CoverageAgent:
+             return cls._handle_tool_failure(state, lookup_call, start)
+         excl02 = lookup_call["results"]
+ 
++        def _unique(*groups: list) -> list:
++            seen_texts: set[str] = set()
++            merged: list = []
++            for clause in (c for group in groups for c in group):
++                text = clause.get("text", "") if isinstance(clause, dict) else getattr(clause, "text", "")
++                if text and text not in seen_texts:
++                    seen_texts.add(text)
++                    merged.append(clause)
++            return merged
++
+         # Combine all unique retrieved clauses
+-        seen_texts: set[str] = set()
+-        combined: list[dict] = []
+-        for clause in base + exclusions + sublimits + daycare + excl02:
+-            text = clause.get("text", "") if isinstance(clause, dict) else getattr(clause, "text", "")
+-            if text and text not in seen_texts:
+-                seen_texts.add(text)
+-                combined.append(clause)
++        combined = _unique(base, exclusions, sublimits, daycare, excl02)
++        # When the outcome is a rejection or escalation, the evidence worth citing is the
++        # waiting-period / exclusion text, not whatever the generic coverage query ranked first.
++        restrictive = _unique(exclusions, excl02, base, sublimits, daycare)
+ 
+         state["base_clauses"] = base
+         state["exclusion_clauses"] = exclusions
+@@ -164,7 +176,7 @@ class CoverageAgent:
+                 escalation_required=True,
+                 route="medical-review",
+             )
+-            state["citations"] = _build_citations(combined[:3])
++            state["citations"] = _build_citations(restrictive[:3])
+             state["current_agent"] = cls.name
+             state["current_status"] = "COMPLETED"
+             state["steps"] = state.get("steps", 0) + 1
+@@ -184,7 +196,7 @@ class CoverageAgent:
+                 escalation_required=True,
+                 route="medical-review",
+             )
+-            state["citations"] = _build_citations(combined[:3])
++            state["citations"] = _build_citations(restrictive[:3])
+             state["current_agent"] = cls.name
+             state["current_status"] = "COMPLETED"
+             state["steps"] = state.get("steps", 0) + 1
+@@ -203,7 +215,7 @@ class CoverageAgent:
+                     reason="Cataract surgery is subject to a 24-month Code-Excl02 waiting period.",
+                     indicative_limit=0.0,
+                 )
+-                state["citations"] = _build_citations(combined[:3])
++                state["citations"] = _build_citations(restrictive[:3])
+                 state["current_agent"] = cls.name
+                 state["current_status"] = "COMPLETED"
+                 state["steps"] = state.get("steps", 0) + 1
+@@ -220,7 +232,7 @@ class CoverageAgent:
+                     reason=f"{request.procedure_name} is subject to a 24-month Code-Excl02 waiting period.",
+                     indicative_limit=0.0,
+                 )
+-                state["citations"] = _build_citations(combined[:3])
++                state["citations"] = _build_citations(restrictive[:3])
+                 state["current_agent"] = cls.name
+                 state["current_status"] = "COMPLETED"
+                 state["steps"] = state.get("steps", 0) + 1
+@@ -236,7 +248,7 @@ class CoverageAgent:
+                     reason=f"{request.procedure_name} is subject to a 24-month Code-Excl02 waiting period.",
+                     indicative_limit=0.0,
+                 )
+-                state["citations"] = _build_citations(combined[:3])
++                state["citations"] = _build_citations(restrictive[:3])
+                 state["current_agent"] = cls.name
+                 state["current_status"] = "COMPLETED"
+                 state["steps"] = state.get("steps", 0) + 1
+@@ -252,7 +264,7 @@ class CoverageAgent:
+                     reason="Kidney/ureteric stone treatment is subject to a 24-month Code-Excl02 waiting period.",
+                     indicative_limit=0.0,
+                 )
+-                state["citations"] = _build_citations(combined[:3])
++                state["citations"] = _build_citations(restrictive[:3])
+                 state["current_agent"] = cls.name
+                 state["current_status"] = "COMPLETED"
+                 state["steps"] = state.get("steps", 0) + 1
+@@ -268,7 +280,7 @@ class CoverageAgent:
+                     reason="Procedure subject to 24-month Code-Excl02 waiting period.",
+                     indicative_limit=0.0,
+                 )
+-                state["citations"] = _build_citations(combined[:3])
++                state["citations"] = _build_citations(restrictive[:3])
+                 state["current_agent"] = cls.name
+                 state["current_status"] = "COMPLETED"
+                 state["steps"] = state.get("steps", 0) + 1
+@@ -284,7 +296,7 @@ class CoverageAgent:
+                     reason="Joint replacement surgery is subject to a 24-month Code-Excl02 waiting period.",
+                     indicative_limit=0.0,
+                 )
+-                state["citations"] = _build_citations(combined[:3])
++                state["citations"] = _build_citations(restrictive[:3])
+                 state["current_agent"] = cls.name
+                 state["current_status"] = "COMPLETED"
+                 state["steps"] = state.get("steps", 0) + 1
+@@ -298,7 +310,7 @@ class CoverageAgent:
+                 reason="Initial 30-day waiting period has not been completed.",
+                 indicative_limit=0.0,
+             )
+-            state["citations"] = _build_citations(combined[:3])
++            state["citations"] = _build_citations(restrictive[:3])
+             state["current_agent"] = cls.name
+             state["current_status"] = "COMPLETED"
+             state["steps"] = state.get("steps", 0) + 1
+diff --git a/src/agents/tools.py b/src/agents/tools.py
+index b3c78a8..1444c37 100644
+--- a/src/agents/tools.py
++++ b/src/agents/tools.py
+@@ -14,6 +14,7 @@ def _get_store(path: str = "data/vector_store.json") -> VectorStore:
+     global _store
+     if _store is None:
+         _store = VectorStore(path)
++        _store.warm_up()  # load the embedding model now, not inside a timed search
+     return _store
+ 
+ 
+@@ -39,6 +40,7 @@ def set_simulated_tool_delay(delay_seconds: float) -> None:
+ 
+ def corpus_search(query: str, top_k: int = 5, timeout_seconds: float = 5.0) -> list[dict]:
+     """Search the policy corpus for relevant clauses."""
++    store = _get_store()  # first call loads the embedding model; keep that out of the timeout window
+     start = time.time()
+ 
+     if _simulated_delay > 0:
+@@ -47,7 +49,6 @@ def corpus_search(query: str, top_k: int = 5, timeout_seconds: float = 5.0) -> l
+     if "corpus_search" in _simulated_failure:
+         raise RuntimeError(_simulated_failure["corpus_search"])
+ 
+-    store = _get_store()
+     results = store.search(query, top_k)
+     duration = time.time() - start
+ 
+@@ -60,6 +61,7 @@ def corpus_search(query: str, top_k: int = 5, timeout_seconds: float = 5.0) -> l
+             "source": r.source,
+             "page": r.page,
+             "clause_id": r.clause_id,
++            "score": round(r.score, 4),
+             "duration": round(duration, 4),
+         }
+         for r in results
+@@ -67,7 +69,8 @@ def corpus_search(query: str, top_k: int = 5, timeout_seconds: float = 5.0) -> l
+ 
+ 
+ def clause_lookup(clause_id: str, timeout_seconds: float = 5.0) -> list[dict]:
+-    """Look up a specific clause by its identifier (e.g., Code-Excl02)."""
++    """Look up a specific clause by its identifier (e.g., Code-Excl02). Exact match, not semantic."""
++    store = _get_store()
+     start = time.time()
+ 
+     if _simulated_delay > 0:
+@@ -76,7 +79,6 @@ def clause_lookup(clause_id: str, timeout_seconds: float = 5.0) -> list[dict]:
+     if "clause_lookup" in _simulated_failure:
+         raise RuntimeError(_simulated_failure["clause_lookup"])
+ 
+-    store = _get_store()
+     results = store.lookup_clause(clause_id)
+     duration = time.time() - start
+ 
+diff --git a/src/ingestion/chunker.py b/src/ingestion/chunker.py
+index 01942a8..a51a516 100644
+--- a/src/ingestion/chunker.py
++++ b/src/ingestion/chunker.py
+@@ -10,6 +10,9 @@ class Chunk:
+     page: int | None = None
+     clause_id: str | None = None
+     chunk_index: int = 0
++    # Relevance assigned by the retriever (BM25 score, cosine, or fused RRF score).
++    # Not part of equality, so two chunks with the same text are still equal.
++    score: float = field(default=0.0, compare=False)
+ 
+ 
+ _CLAUSE_PATTERNS = [
+@@ -60,6 +63,15 @@ def split_text(text: str, source: str, page: int | None = None, chunk_size: int
+     return chunks
+ 
+ 
++def _is_front_matter(text: str) -> bool:
++    """Title page / table of contents.
++
++    It names every topic in the policy but answers none, so it matches almost
++    any query (keyword or semantic) and ends up cited as "evidence".
++    """
++    return "table of contents" in text.lower()
++
++
+ def load_documents(corpus_dir: str | Path) -> list[Chunk]:
+     chunks: list[Chunk] = []
+     for path in sorted(Path(corpus_dir).glob("*")):
+@@ -70,4 +82,4 @@ def load_documents(corpus_dir: str | Path) -> list[Chunk]:
+             raw = path.read_text(encoding="utf-8")
+             if raw.strip():
+                 chunks.extend(split_text(raw, path.name))
+-    return chunks
++    return [c for c in chunks if not _is_front_matter(c.text)]
+diff --git a/src/ingestion/embedder.py b/src/ingestion/embedder.py
+new file mode 100644
+index 0000000..d090121
+--- /dev/null
++++ b/src/ingestion/embedder.py
+@@ -0,0 +1,92 @@
++"""Embedding backends for semantic retrieval.
++
++The default backend is fastembed (ONNX runtime, no PyTorch) running
++BAAI/bge-small-en-v1.5 locally, so no API key or network call is needed at
++query time once the model weights are cached.
++
++Environment variables
++---------------------
++RAG_EMBEDDING_BACKEND   fastembed (default) | none   ("none" = keyword/BM25 only)
++RAG_EMBEDDING_MODEL     any fastembed text model (default BAAI/bge-small-en-v1.5)
++FASTEMBED_CACHE_PATH    where the model weights are cached
++"""
++from __future__ import annotations
++
++import logging
++import os
++from functools import lru_cache
++from typing import Protocol, Sequence
++
++import numpy as np
++
++log = logging.getLogger(__name__)
++
++DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
++
++# BGE models retrieve noticeably better when short queries carry this instruction
++# (passages are embedded as-is).
++BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
++
++
++class Embedder(Protocol):
++    """Anything that can turn text into unit-length vectors."""
++
++    name: str
++
++    def embed_passages(self, texts: Sequence[str]) -> np.ndarray: ...
++
++    def embed_query(self, text: str) -> np.ndarray: ...
++
++
++def _normalise(vectors: np.ndarray) -> np.ndarray:
++    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
++    return vectors / np.clip(norms, 1e-12, None)
++
++
++class FastEmbedEmbedder:
++    def __init__(self, model_name: str = DEFAULT_MODEL, cache_dir: str | None = None) -> None:
++        from fastembed import TextEmbedding  # lazy: only needed when embeddings are on
++
++        self.name = model_name
++        self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
++        self._query_prefix = BGE_QUERY_PREFIX if "bge" in model_name.lower() else ""
++
++    def _embed(self, texts: Sequence[str]) -> np.ndarray:
++        return _normalise(np.asarray(list(self._model.embed(list(texts))), dtype=np.float32))
++
++    def embed_passages(self, texts: Sequence[str]) -> np.ndarray:
++        return self._embed(texts)
++
++    def embed_query(self, text: str) -> np.ndarray:
++        return self._embed([self._query_prefix + text])[0]
++
++
++@lru_cache(maxsize=4)
++def _load(model_name: str, cache_dir: str | None) -> FastEmbedEmbedder:
++    return FastEmbedEmbedder(model_name, cache_dir)
++
++
++def get_embedder(strict: bool = False) -> Embedder | None:
++    """Return the configured embedder, or None when semantic retrieval is off.
++
++    strict=True is for ingestion: if embeddings were requested but the model
++    cannot be loaded, raise instead of quietly building a keyword-only index.
++    At query time (strict=False) we log a warning and degrade to BM25 so the
++    service stays up.
++    """
++    backend = os.getenv("RAG_EMBEDDING_BACKEND", "fastembed").strip().lower()
++    if backend in {"none", "off", "lexical", "bm25"}:
++        return None
++    if backend != "fastembed":
++        raise ValueError(f"Unknown RAG_EMBEDDING_BACKEND={backend!r} (use 'fastembed' or 'none')")
++    model = os.getenv("RAG_EMBEDDING_MODEL", DEFAULT_MODEL)
++    try:
++        return _load(model, os.getenv("FASTEMBED_CACHE_PATH") or None)
++    except Exception as exc:  # network down, model missing, fastembed not installed...
++        if strict:
++            raise RuntimeError(
++                f"Could not load embedding model {model!r}: {exc}. "
++                "Fix the cause, or set RAG_EMBEDDING_BACKEND=none to build a keyword-only index."
++            ) from exc
++        log.warning("Embedding model %r unavailable (%s); falling back to BM25-only retrieval", model, exc)
++        return None
+diff --git a/src/ingestion/ingest_pipeline.py b/src/ingestion/ingest_pipeline.py
+index 867d7af..b9c22b4 100644
+--- a/src/ingestion/ingest_pipeline.py
++++ b/src/ingestion/ingest_pipeline.py
+@@ -5,6 +5,7 @@ import time
+ from pathlib import Path
+ 
+ from .chunker import load_documents
++from .embedder import Embedder, get_embedder
+ from .vector_store import VectorStore
+ 
+ 
+@@ -25,30 +26,39 @@ def ingest(
+     store_path: str | Path = "data/vector_store.json",
+     manifest_path: str | Path = "data/index_manifest.json",
+     force: bool = False,
++    embedder: Embedder | None = None,
+ ) -> int:
+     corpus_dir = Path(corpus_dir)
+     manifest_path = Path(manifest_path)
+ 
++    # None -> configured from RAG_EMBEDDING_BACKEND; strict so a failed model load stops the build
++    embedder = embedder or get_embedder(strict=True)
++    embedding_version = embedder.name if embedder else "bm25-only"
++
+     current_hashes = _corpus_hashes(corpus_dir)
+ 
+-    # Idempotency: skip if nothing changed
++    # Idempotency: skip only if neither the corpus nor the embedding model changed
+     if not force and manifest_path.exists():
+         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+-        if manifest.get("corpus_versions") == current_hashes:
+-            print("Corpus unchanged; skipping rebuild. Use --force to override.")
++        if (
++            manifest.get("corpus_versions") == current_hashes
++            and manifest.get("embedding_version") == embedding_version
++        ):
++            print("Corpus and embedding model unchanged; skipping rebuild. Use --force to override.")
+             return manifest.get("chunk_count", 0)
+ 
+     start = time.time()
+     chunks = load_documents(corpus_dir)
+     store = VectorStore(store_path)
+-    store.add_chunks(chunks)
++    store.add_chunks(chunks, embedder)
+     store.persist()
+     duration = time.time() - start
+ 
+     manifest = {
+         "build_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+         "corpus_versions": current_hashes,
+-        "embedding_version": "token-overlap-v2",
++        "embedding_version": embedding_version,
++        "retrieval_mode": "hybrid" if embedder else "lexical",
+         "chunk_count": len(chunks),
+         "processing_duration_seconds": round(duration, 3),
+         "throughput_chunks_per_second": round(len(chunks) / max(duration, 0.001), 1),
+diff --git a/src/ingestion/vector_store.py b/src/ingestion/vector_store.py
+index a141662..cb8097b 100644
+--- a/src/ingestion/vector_store.py
++++ b/src/ingestion/vector_store.py
+@@ -1,24 +1,71 @@
++"""Hybrid retrieval store: dense embeddings + BM25, merged with Reciprocal Rank Fusion.
++
++Why hybrid rather than embeddings alone: policy text is full of exact
++identifiers ("Code-Excl02", "Section 5") that embedding models blur together,
++while keyword search is blind to paraphrases ("eye lens operation" vs
++"cataract surgery"). Fusing both rankings gets the strengths of each.
++
++Retrieval modes
++---------------
++hybrid   dense + BM25 fused with RRF          (default when the store has embeddings)
++dense    embeddings only
++lexical  BM25 only                            (automatic fallback, no model needed)
++"""
++from __future__ import annotations
++
+ import json
++import logging
++import math
++import os
+ import re
++from collections import Counter
+ from pathlib import Path
+ from typing import Iterable
+ 
++import numpy as np
++
+ from .chunker import Chunk
++from .embedder import Embedder, get_embedder
++
++log = logging.getLogger(__name__)
+ 
++RRF_K = 60                   # standard Reciprocal Rank Fusion constant
++BM25_K1, BM25_B = 1.5, 0.75  # standard BM25 parameters
+ 
+-def _tokens(text: str) -> set[str]:
+-    return set(re.findall(r"[a-z0-9][a-z0-9-]+", text.lower()))
++
++# Function words only. Words like "not", "after", "within", "per" change a policy's meaning, so they stay.
++_STOPWORDS = frozenset({
++    "an", "and", "are", "as", "at", "be", "by", "do", "does", "for", "from", "how", "in", "is", "it",
++    "its", "of", "on", "or", "that", "the", "this", "to", "was", "were", "what", "which", "with",
++})
++
++
++def _tokens(text: str) -> list[str]:
++    # Hyphenated identifiers such as "code-excl02" stay as a single token.
++    return [t for t in re.findall(r"[a-z0-9][a-z0-9-]+", text.lower()) if t not in _STOPWORDS]
+ 
+ 
+ class VectorStore:
+-    def __init__(self, path: str | Path = "data/vector_store.json") -> None:
++    def __init__(
++        self,
++        path: str | Path = "data/vector_store.json",
++        embedder: Embedder | None = None,
++        min_similarity: float | None = None,
++    ) -> None:
+         self.path = Path(path)
+         self.records: list[dict] = []
+         if self.path.exists():
+             self.records = json.loads(self.path.read_text(encoding="utf-8"))
++        # Dense hits must have cosine similarity strictly above this (0 = any positive similarity).
++        self.min_similarity = (
++            float(os.getenv("RAG_MIN_SIMILARITY", "0")) if min_similarity is None else min_similarity
++        )
++        self._injected = embedder  # None -> resolve from environment on first use
++        self._reindex()
+ 
+-    def add_chunks(self, chunks: Iterable[Chunk]) -> None:
+-        self.records = [
++    # ------------------------------------------------------------------ build
++    def add_chunks(self, chunks: Iterable[Chunk], embedder: Embedder | None = None) -> None:
++        records = [
+             {
+                 "text": c.text,
+                 "source": c.source,
+@@ -28,46 +75,141 @@ class VectorStore:
+             }
+             for c in chunks
+         ]
++        if embedder is not None and records:
++            vectors = embedder.embed_passages([r["text"] for r in records])
++            for record, vector in zip(records, vectors):
++                record["embedding"] = [round(float(x), 5) for x in vector]
++                record["embedding_model"] = embedder.name
++            self._injected = embedder
++        self.records = records
++        self._reindex()
+ 
+     def persist(self) -> None:
+         self.path.parent.mkdir(parents=True, exist_ok=True)
+-        self.path.write_text(json.dumps(self.records, indent=2), encoding="utf-8")
++        # One record per line: still valid JSON, but embeddings don't explode into thousands of lines.
++        body = ",\n".join(json.dumps(r, ensure_ascii=False) for r in self.records)
++        self.path.write_text(f"[\n{body}\n]\n", encoding="utf-8")
++
++    def _reindex(self) -> None:
++        # Lexical (BM25) statistics
++        self._doc_tf = [Counter(_tokens(r["text"])) for r in self.records]
++        self._doc_len = [sum(tf.values()) for tf in self._doc_tf]
++        n = len(self.records)
++        self._avg_len = (sum(self._doc_len) / n) if n else 0.0
++        df: Counter = Counter()
++        for tf in self._doc_tf:
++            df.update(tf.keys())
++        self._idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
++
++        # Dense matrix (only if every record carries an embedding from one model)
++        self._matrix: np.ndarray | None = None
++        self._store_model: str | None = None
++        if self.records and all(r.get("embedding") for r in self.records):
++            models = {r.get("embedding_model") for r in self.records}
++            if len(models) == 1:
++                self._matrix = np.asarray([r["embedding"] for r in self.records], dtype=np.float32)
++                self._store_model = models.pop()
+ 
+-    def search(self, query: str, top_k: int = 5) -> list[Chunk]:
+-        query_tokens = _tokens(query)
++        self._resolved = False
++        self._active: Embedder | None = None
++
++    # -------------------------------------------------------- embedder wiring
++    def _ensure_resolved(self) -> None:
++        """Decide once whether semantic retrieval can be used with this store."""
++        if self._resolved:
++            return
++        self._resolved = True
++        self._active = None
++        if self._matrix is None:
++            if self.records:
++                log.warning("Vector store has no embeddings; using BM25-only retrieval. Re-run ingestion.")
++            return
++        embedder = self._injected or get_embedder()
++        if embedder is None:
++            return
++        if embedder.name != self._store_model:
++            log.warning(
++                "Vector store was built with %r but the active embedder is %r; "
++                "using BM25-only retrieval. Re-run ingestion.",
++                self._store_model,
++                embedder.name,
++            )
++            return
++        self._active = embedder
++
++    @property
++    def retrieval_mode(self) -> str:
++        self._ensure_resolved()
++        return "hybrid" if self._active is not None else "lexical"
++
++    def warm_up(self) -> str:
++        """Load the embedding model now so the first real query is not slow."""
++        mode = self.retrieval_mode
++        if self._active is not None:
++            self._active.embed_query("warm up")
++        return mode
++
++    # ----------------------------------------------------------------- search
++    def _chunk(self, index: int, score: float = 0.0) -> Chunk:
++        r = self.records[index]
++        return Chunk(r["text"], r["source"], r.get("page"), r.get("clause_id"), r.get("chunk_index", 0), score)
++
++    def _bm25(self, query: str) -> list[tuple[int, float]]:
++        terms = set(_tokens(query))
++        avg_len = self._avg_len or 1.0
+         scored = []
+-        for record in self.records:
+-            score = len(query_tokens & _tokens(record["text"]))
+-            if score:
+-                scored.append((
+-                    score,
+-                    Chunk(
+-                        record["text"],
+-                        record["source"],
+-                        record.get("page"),
+-                        record.get("clause_id"),
+-                        record.get("chunk_index", 0),
+-                    ),
+-                ))
+-        scored.sort(key=lambda item: item[0], reverse=True)
+-        return [chunk for _, chunk in scored[:top_k]]
++        for i, tf in enumerate(self._doc_tf):
++            score = 0.0
++            for term in terms:
++                freq = tf.get(term)
++                if not freq:
++                    continue
++                norm = freq + BM25_K1 * (1 - BM25_B + BM25_B * self._doc_len[i] / avg_len)
++                score += self._idf[term] * freq * (BM25_K1 + 1) / norm
++            if score > 0:
++                scored.append((i, score))
++        scored.sort(key=lambda item: (-item[1], item[0]))
++        return scored
++
++    def _dense(self, query: str) -> list[tuple[int, float]]:
++        sims = self._matrix @ self._active.embed_query(query)
++        order = np.argsort(-sims, kind="stable")
++        return [(int(i), float(sims[i])) for i in order if sims[i] > self.min_similarity]
++
++    @staticmethod
++    def _rrf(*rankings: list[tuple[int, float]]) -> list[tuple[int, float]]:
++        fused: dict[int, float] = {}
++        for ranking in rankings:
++            for rank, (index, _) in enumerate(ranking, start=1):
++                fused[index] = fused.get(index, 0.0) + 1.0 / (RRF_K + rank)
++        return sorted(fused.items(), key=lambda item: (-item[1], item[0]))
++
++    def search(self, query: str, top_k: int = 5, mode: str | None = None) -> list[Chunk]:
++        """Return the top_k most relevant chunks. mode: None (auto) | hybrid | dense | lexical."""
++        if not self.records or top_k <= 0:
++            return []
++        self._ensure_resolved()
++        if mode is None:
++            mode = "hybrid" if self._active is not None else "lexical"
++        if mode not in {"hybrid", "dense", "lexical"}:
++            raise ValueError(f"Unknown retrieval mode: {mode!r}")
++        if mode != "lexical" and self._active is None:
++            raise ValueError(f"mode={mode!r} needs embeddings matching an available embedding model")
++
++        pool = max(top_k * 4, 20)  # candidates per ranking before fusion
++        lexical = self._bm25(query)[:pool] if mode != "dense" else []
++        dense = self._dense(query)[:pool] if mode != "lexical" else []
++        ranked = lexical if mode == "lexical" else dense if mode == "dense" else self._rrf(lexical, dense)
++        return [self._chunk(i, score) for i, score in ranked[:top_k]]
+ 
+     def lookup_clause(self, clause_id: str) -> list[Chunk]:
+         results = []
+         clause_lower = clause_id.lower()
+-        for record in self.records:
++        for index, record in enumerate(self.records):
+             rid = (record.get("clause_id") or "").lower()
+             text_lower = record["text"].lower()
+             if clause_lower in rid or clause_lower in text_lower:
+-                results.append(
+-                    Chunk(
+-                        record["text"],
+-                        record["source"],
+-                        record.get("page"),
+-                        record.get("clause_id"),
+-                        record.get("chunk_index", 0),
+-                    )
+-                )
++                results.append(self._chunk(index))
+         return results
+ 
+     def retrieve_corpus_clause(self, query: str, top_k: int = 5) -> list[Chunk]:
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 20e4ba0..3c47748 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -6,6 +6,9 @@ from pathlib import Path
+ @pytest.fixture(autouse=True)
+ def tmp_data_dir(tmp_path):
+     """Isolate result, quarantine, and feedback files in a temp directory."""
++    # Keep the suite fast and offline: no embedding-model download. Semantic retrieval is
++    # tested in test_semantic_retrieval.py with an injected fake embedder.
++    os.environ["RAG_EMBEDDING_BACKEND"] = "none"
+     os.environ["RESULT_STORE_PATH"] = str(tmp_path / "results.json")
+     os.environ["QUARANTINE_PATH"] = str(tmp_path / "quarantine_records.json")
+     os.environ["FEEDBACK_PATH"] = str(tmp_path / "feedback.json")
+@@ -13,6 +16,7 @@ def tmp_data_dir(tmp_path):
+     os.environ.pop("RESULT_STORE_PATH", None)
+     os.environ.pop("QUARANTINE_PATH", None)
+     os.environ.pop("FEEDBACK_PATH", None)
++    os.environ.pop("RAG_EMBEDDING_BACKEND", None)
+ 
+ 
+ @pytest.fixture
+diff --git a/tests/test_semantic_retrieval.py b/tests/test_semantic_retrieval.py
+new file mode 100644
+index 0000000..14c49ee
+--- /dev/null
++++ b/tests/test_semantic_retrieval.py
+@@ -0,0 +1,150 @@
++"""Tests for hybrid (BM25 + embeddings + RRF) retrieval.
++
++These run offline: a tiny FakeEmbedder maps synonym groups onto shared vector
++dimensions, which is enough to exercise fusion, persistence, fallback and
++idempotency. They do NOT measure the quality of the real embedding model; use
++`python -m eval.evaluate_rag` for that.
++"""
++import json
++import logging
++
++import numpy as np
++import pytest
++
++from src.ingestion.chunker import Chunk, load_documents
++from src.ingestion.ingest_pipeline import ingest
++from src.ingestion.vector_store import VectorStore
++
++CONCEPTS = [
++    {"cataract", "eye", "lens", "phacoemulsification", "ophthalmic"},
++    {"waiting", "wait", "period", "delay", "months"},
++    {"room", "rent", "ward", "bed", "icu"},
++    {"cosmetic", "aesthetic", "excluded", "exclusion"},
++]
++
++
++class FakeEmbedder:
++    """Bag-of-concepts embedder: words in the same group share a dimension."""
++
++    def __init__(self, name: str = "fake-concepts-v1") -> None:
++        self.name = name
++
++    def _vec(self, text: str) -> np.ndarray:
++        words = text.lower().replace(".", " ").split()
++        v = np.array([sum(w in group for w in words) for group in CONCEPTS], dtype=np.float32)
++        norm = np.linalg.norm(v)
++        return v / norm if norm else v
++
++    def embed_passages(self, texts):
++        return np.stack([self._vec(t) for t in texts])
++
++    def embed_query(self, text):
++        return self._vec(text)
++
++
++CHUNKS = [
++    Chunk("Cataract surgery is covered only after a 24 month waiting period.", "p.txt", clause_id="Code-Excl02"),
++    Chunk("Room rent is limited to one percent of the sum insured per day.", "p.txt", clause_id="7.1"),
++    Chunk("Cosmetic procedures are permanently excluded from cover.", "p.txt", clause_id="6.1"),
++    Chunk("Clause Code-Excl07 sets the rules for hernia repair.", "p.txt", clause_id="Code-Excl07"),
++]
++
++
++@pytest.fixture
++def store(tmp_path):
++    s = VectorStore(tmp_path / "store.json", embedder=FakeEmbedder())
++    s.add_chunks(CHUNKS, FakeEmbedder())
++    return s
++
++
++class TestHybridSearch:
++    def test_semantic_match_with_no_shared_keywords(self, store):
++        query = "operation on the eye lens"  # shares no word with the cataract chunk
++        assert store.search(query, top_k=3, mode="lexical") == []
++        for mode in ("dense", "hybrid", None):
++            top = store.search(query, top_k=1, mode=mode)
++            assert top and "Cataract" in top[0].text
++
++    def test_exact_identifier_still_found_via_keywords(self, store):
++        # Embeddings know nothing about "Code-Excl07"; BM25 must carry it in the fused ranking.
++        top = store.search("Code-Excl07", top_k=1)
++        assert top and top[0].clause_id == "Code-Excl07"
++
++    def test_results_carry_descending_scores(self, store):
++        results = store.search("waiting period for eye surgery", top_k=4)
++        scores = [r.score for r in results]
++        assert scores and all(s > 0 for s in scores)
++        assert scores == sorted(scores, reverse=True)
++
++    def test_min_similarity_filters_weak_dense_hits(self, tmp_path):
++        s = VectorStore(tmp_path / "s.json", embedder=FakeEmbedder(), min_similarity=0.999)
++        s.add_chunks(CHUNKS, FakeEmbedder())
++        assert s.search("operation on the eye lens", mode="dense") == []
++
++    def test_dense_mode_without_embeddings_is_an_error(self, tmp_path):
++        s = VectorStore(tmp_path / "s.json")
++        s.add_chunks(CHUNKS)  # no embedder -> keyword-only store
++        assert s.retrieval_mode == "lexical"
++        assert s.search("cataract waiting period")  # auto mode degrades gracefully
++        with pytest.raises(ValueError):
++            s.search("cataract", mode="dense")
++
++
++class TestPersistenceAndFallback:
++    def test_embeddings_survive_persist_and_reload(self, store):
++        store.persist()
++        raw = json.loads(store.path.read_text(encoding="utf-8"))
++        assert all(r["embedding_model"] == "fake-concepts-v1" and r["embedding"] for r in raw)
++
++        reloaded = VectorStore(store.path, embedder=FakeEmbedder())
++        assert reloaded.retrieval_mode == "hybrid"
++        assert "Cataract" in reloaded.search("operation on the eye lens", top_k=1)[0].text
++
++    def test_model_mismatch_falls_back_to_lexical(self, store, caplog):
++        store.persist()
++        with caplog.at_level(logging.WARNING):
++            other = VectorStore(store.path, embedder=FakeEmbedder(name="some-other-model"))
++            assert other.retrieval_mode == "lexical"
++        assert "Re-run ingestion" in caplog.text
++
++    def test_clause_lookup_is_unchanged(self, store):
++        assert [c.clause_id for c in store.lookup_clause("Code-Excl02")] == ["Code-Excl02"]
++
++
++class TestIngestion:
++    def _corpus(self, tmp_path):
++        d = tmp_path / "corpus"
++        d.mkdir()
++        (d / "policy.txt").write_text("Cataract surgery has a waiting period.\n\nRoom rent is limited.")
++        return d
++
++    def test_ingest_embeds_and_records_model(self, tmp_path):
++        d = self._corpus(tmp_path)
++        n = ingest(str(d), str(tmp_path / "s.json"), str(tmp_path / "m.json"), force=True, embedder=FakeEmbedder())
++        manifest = json.loads((tmp_path / "m.json").read_text())
++        assert n >= 1
++        assert manifest["embedding_version"] == "fake-concepts-v1"
++        assert manifest["retrieval_mode"] == "hybrid"
++
++    def test_changing_the_model_triggers_a_rebuild(self, tmp_path):
++        d = self._corpus(tmp_path)
++        args = (str(d), str(tmp_path / "s.json"), str(tmp_path / "m.json"))
++        ingest(*args, force=True, embedder=FakeEmbedder("fake-concepts-v1"))
++        ingest(*args, force=False, embedder=FakeEmbedder("fake-concepts-v1"))  # unchanged -> skipped
++        ingest(*args, force=False, embedder=FakeEmbedder("fake-concepts-v2"))  # model changed -> rebuilt
++        manifest = json.loads((tmp_path / "m.json").read_text())
++        assert manifest["embedding_version"] == "fake-concepts-v2"
++        stored = json.loads((tmp_path / "s.json").read_text())
++        assert {r["embedding_model"] for r in stored} == {"fake-concepts-v2"}
++
++    def test_front_matter_is_not_indexed(self):
++        chunks = load_documents("data/corpus")
++        assert chunks
++        assert not any("table of contents" in c.text.lower() for c in chunks)
++
++
++def test_corpus_search_tool_reports_scores(reset_tools):
++    from src.agents.tools import corpus_search
++
++    results = corpus_search("cataract surgery waiting period", top_k=3)
++    assert results and all("score" in r for r in results)

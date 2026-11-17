@@ -10,8 +10,10 @@ from uuid import uuid4
 
 from data_contracts import PreAuthRequest
 from src.agents.graph import run_workflow
+from src.observability.tracing import extract_trace_context, init_tracer, trace_span
 
 logger = logging.getLogger("preauth.worker")
+init_tracer(service_name=os.getenv("OTEL_WORKER_SERVICE_NAME", "preauth-worker"))
 
 try:
     from celery import Celery
@@ -53,9 +55,15 @@ def _idempotency_key(payload: dict) -> str:
     return hashlib.sha256(serialized.encode()).hexdigest()
 
 
-def process_request(payload: dict, task_id: str | None = None, run_id: str | None = None) -> str:
+def process_request(
+    payload: dict,
+    task_id: str | None = None,
+    run_id: str | None = None,
+    trace_headers: dict | None = None,
+) -> str:
     task_id = task_id or str(uuid4())
     run_id = run_id or str(uuid4())
+    parent_ctx = extract_trace_context(trace_headers or {}) if trace_headers else None
 
     # Idempotency check
     idem_key = _idempotency_key(payload)
@@ -88,16 +96,24 @@ def process_request(payload: dict, task_id: str | None = None, run_id: str | Non
         }
 
     _local_results[task_id] = result
-    _save(task_id, result)
+    with trace_span("preauth.result.persist", attributes={"preauth.run_id": run_id}, parent_context=parent_ctx):
+        _save(task_id, result)
     _processed_keys.add(idem_key)
     return task_id
 
 
 if celery_app:
     @celery_app.task(name="preauth.process", bind=True, max_retries=2, default_retry_delay=5)
-    def process_request_task(self, payload: dict, task_id: str, run_id: str = "") -> str:
+    def process_request_task(
+        self,
+        payload: dict,
+        task_id: str,
+        run_id: str = "",
+        trace_headers: dict | None = None,
+    ) -> str:
+        headers = trace_headers or getattr(self.request, "headers", None) or {}
         try:
-            return process_request(payload, task_id, run_id or str(uuid4()))
+            return process_request(payload, task_id, run_id or str(uuid4()), trace_headers=headers)
         except Exception as exc:
             logger.error("Celery task failed (attempt %d): %s", self.request.retries, exc)
             if self.request.retries < self.max_retries:
@@ -107,13 +123,16 @@ if celery_app:
             return task_id
 
 
-def enqueue(payload: dict, run_id: str = "") -> str:
+def enqueue(payload: dict, run_id: str = "", trace_headers: dict | None = None) -> str:
     task_id = str(uuid4())
     run_id = run_id or str(uuid4())
     if celery_app:
-        process_request_task.delay(payload, task_id, run_id)
+        process_request_task.apply_async(
+            args=[payload, task_id, run_id, trace_headers or {}],
+            headers=trace_headers or {},
+        )
     else:
-        process_request(payload, task_id, run_id)
+        process_request(payload, task_id, run_id, trace_headers=trace_headers)
     return task_id
 
 

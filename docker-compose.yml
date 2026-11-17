@@ -11,11 +11,19 @@ services:
       QUARANTINE_PATH: /app/data/quarantine_records.json
       FEEDBACK_PATH: /app/data/feedback.json
       VECTOR_STORE_PATH: /app/data/vector_store.json
+      VECTOR_INDEX_PATH: /app/data/semantic_index
+      AGENT_RUNTIME: "langgraph"
+      SEMANTIC_RETRIEVAL_ENABLED: "true"
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: "preauth-api"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318/v1/traces"
     volumes:
       - preauth_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -32,11 +40,36 @@ services:
       RESULT_STORE_PATH: /app/data/results.json
       QUARANTINE_PATH: /app/data/quarantine_records.json
       VECTOR_STORE_PATH: /app/data/vector_store.json
+      VECTOR_INDEX_PATH: /app/data/semantic_index
+      AGENT_RUNTIME: "langgraph"
+      SEMANTIC_RETRIEVAL_ENABLED: "true"
+      OTEL_ENABLED: "true"
+      OTEL_WORKER_SERVICE_NAME: "preauth-worker"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318/v1/traces"
     volumes:
       - preauth_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
+
+  client:
+    build: .
+    command: streamlit run src/client/app.py --server.address=0.0.0.0 --server.port=8501 --server.headless=true
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: http://app:8000
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   redis:
     image: redis:7-alpine
@@ -47,6 +80,15 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
 
   prometheus:
     image: prom/prometheus:v2.47.0

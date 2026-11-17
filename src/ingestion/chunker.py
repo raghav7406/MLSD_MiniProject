@@ -10,6 +10,8 @@ class Chunk:
     page: int | None = None
     clause_id: str | None = None
     chunk_index: int = 0
+    similarity_score: float | None = None
+    retrieval_mode: str = "lexical"
 
 
 _CLAUSE_PATTERNS = [

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from prometheus_client import Counter, Gauge, Histogram, make_asgi_app
 
 from data_contracts import PreAuthRequest
+from src.observability.tracing import extract_trace_context, init_tracer, inject_trace_context, trace_span
 from .cache import result_cache
 from .circuit_breaker import provider_breaker
 from .quarantine import quarantine_payload
@@ -20,6 +21,7 @@ from .rate_limiter import rate_limiter
 from .worker import enqueue, get_result
 
 logger = logging.getLogger("preauth.api")
+init_tracer(service_name=os.getenv("OTEL_SERVICE_NAME", "preauth-api"))
 
 app = FastAPI(title="Health Insurance Pre-Authorisation Desk", version="2.0.0")
 
@@ -96,8 +98,11 @@ async def submit_preauth(request: Request, payload: PreAuthRequest) -> dict:
     run_id = str(uuid.uuid4())
 
     request_count.labels(status="submitted").inc()
-    with request_latency.time():
-        task_id = enqueue(payload_dict, run_id=run_id)
+    trace_carrier: dict[str, str] = {}
+    with trace_span("preauth.submit", attributes={"preauth.run_id": run_id, "preauth.correlation_id": correlation_id}):
+        inject_trace_context(trace_carrier)
+        with request_latency.time():
+            task_id = enqueue(payload_dict, run_id=run_id, trace_headers=trace_carrier)
 
     queue_depth.inc()
     response = {
@@ -114,30 +119,31 @@ async def submit_preauth(request: Request, payload: PreAuthRequest) -> dict:
 # ── Poll result ─────────────────────────────────────────────────────────────────
 @app.get("/api/v1/preauth/{task_id}")
 async def preauth_status(task_id: str) -> dict:
-    result = get_result(task_id)
-    if result is None:
-        return {"task_id": task_id, "status": "PENDING"}
+    with trace_span("preauth.poll", attributes={"preauth.run_id": task_id}):
+        result = get_result(task_id)
+        if result is None:
+            return {"task_id": task_id, "status": "PENDING"}
 
-    if result.get("status") == "SUCCESS":
-        request_count.labels(status="success").inc()
-        res = result.get("result", {})
-        if res.get("escalation_required"):
-            escalation_count.inc()
-        for step_name, duration in res.get("step_timings", {}).items():
-            step_latency.labels(step=step_name).observe(duration)
-        tool_calls_meta = res.get("metadata", {}).get("tool_calls", 0)
-        tool_call_count = len(tool_calls_meta) if isinstance(tool_calls_meta, list) else int(tool_calls_meta)
-        if tool_call_count:
-            tool_calls_total.inc(tool_call_count)
-    elif result.get("status") == "FAILED":
-        request_count.labels(status="failed").inc()
-        error_count.labels(type="workflow_failure").inc()
+        if result.get("status") == "SUCCESS":
+            request_count.labels(status="success").inc()
+            res = result.get("result", {})
+            if res.get("escalation_required"):
+                escalation_count.inc()
+            for step_name, duration in res.get("step_timings", {}).items():
+                step_latency.labels(step=step_name).observe(duration)
+            tool_calls_meta = res.get("metadata", {}).get("tool_calls", 0)
+            tool_call_count = len(tool_calls_meta) if isinstance(tool_calls_meta, list) else int(tool_calls_meta)
+            if tool_call_count:
+                tool_calls_total.inc(tool_call_count)
+        elif result.get("status") == "FAILED":
+            request_count.labels(status="failed").inc()
+            error_count.labels(type="workflow_failure").inc()
 
-    state_map = {"CLOSED": 0, "OPEN": 1, "HALF_OPEN": 2}
-    circuit_state.set(state_map.get(provider_breaker.state, 0))
-    worker_uptime.set(round(time.time() - _start_time, 1))
+        state_map = {"CLOSED": 0, "OPEN": 1, "HALF_OPEN": 2}
+        circuit_state.set(state_map.get(provider_breaker.state, 0))
+        worker_uptime.set(round(time.time() - _start_time, 1))
 
-    return {"task_id": task_id, **result}
+        return {"task_id": task_id, **result}
 
 
 # ── Feedback endpoint ───────────────────────────────────────────────────────────
@@ -153,17 +159,18 @@ async def submit_feedback(request: Request) -> dict:
     if satisfactory is None:
         raise HTTPException(status_code=400, detail="satisfactory (bool) is required")
 
-    feedback_path = Path(os.getenv("FEEDBACK_PATH", "data/feedback.json"))
-    feedback_path.parent.mkdir(parents=True, exist_ok=True)
-    records = json.loads(feedback_path.read_text(encoding="utf-8")) if feedback_path.exists() else []
-    records.append({
-        "run_id": run_id,
-        "satisfactory": satisfactory,
-        "reason": reason,
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
-    })
-    feedback_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
-    return {"status": "recorded", "run_id": run_id}
+    with trace_span("preauth.feedback", attributes={"preauth.run_id": run_id}):
+        feedback_path = Path(os.getenv("FEEDBACK_PATH", "data/feedback.json"))
+        feedback_path.parent.mkdir(parents=True, exist_ok=True)
+        records = json.loads(feedback_path.read_text(encoding="utf-8")) if feedback_path.exists() else []
+        records.append({
+            "run_id": run_id,
+            "satisfactory": satisfactory,
+            "reason": reason,
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        })
+        feedback_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+        return {"status": "recorded", "run_id": run_id}
 
 
 # ── Feedback summary ────────────────────────────────────────────────────────────

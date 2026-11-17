@@ -17,6 +17,7 @@ from typing import Any
 
 from data_contracts import Citation, Recommendation
 
+from .clinical_taxonomy import match_waiting_condition
 from .state import AgentState, CoverageOutput
 from .tools import execute_tool
 
@@ -126,14 +127,20 @@ class CoverageAgent:
             return cls._handle_tool_failure(state, lookup_call, start)
         excl02 = lookup_call["results"]
 
+        def _unique(*groups: list) -> list:
+            seen_texts: set[str] = set()
+            merged: list = []
+            for clause in (c for group in groups for c in group):
+                text = clause.get("text", "") if isinstance(clause, dict) else getattr(clause, "text", "")
+                if text and text not in seen_texts:
+                    seen_texts.add(text)
+                    merged.append(clause)
+            return merged
+
         # Combine all unique retrieved clauses
-        seen_texts: set[str] = set()
-        combined: list[dict] = []
-        for clause in base + exclusions + sublimits + daycare + excl02:
-            text = clause.get("text", "") if isinstance(clause, dict) else getattr(clause, "text", "")
-            if text and text not in seen_texts:
-                seen_texts.add(text)
-                combined.append(clause)
+        combined = _unique(base, exclusions, sublimits, daycare, excl02)
+        # Prioritize exclusionary & specific waiting period clauses for rejection / escalation evidence
+        restrictive = _unique(exclusions, excl02, base, sublimits, daycare)
 
         state["base_clauses"] = base
         state["exclusion_clauses"] = exclusions
@@ -196,14 +203,15 @@ class CoverageAgent:
         text_lower = f"{request.procedure_name} {request.diagnosis_name}".lower()
 
         # Cataract
-        if category == "cataract surgery":
+        cataract_terms = ["cataract", "phacoemulsification", "lens replacement", "iol"]
+        if category == "cataract surgery" or match_waiting_condition(text_lower, cataract_terms):
             if request.policy_tenure_months < 24:
                 state.update(
                     recommendation=Recommendation.REJECT.value,
                     reason="Cataract surgery is subject to a 24-month Code-Excl02 waiting period.",
                     indicative_limit=0.0,
                 )
-                state["citations"] = _build_citations(combined[:3])
+                state["citations"] = _build_citations(restrictive[:3])
                 state["current_agent"] = cls.name
                 state["current_status"] = "COMPLETED"
                 state["steps"] = state.get("steps", 0) + 1
@@ -211,80 +219,67 @@ class CoverageAgent:
                 return state
             indicative_limit = min(request.estimated_cost, 40000.0)
 
-        # Gastrointestinal
-        if category == "gastrointestinal treatment":
-            gastro_waiting = {"hernia", "fistula", "piles", "haemorrhoids", "hemorrhoids"}
-            if any(term in text_lower for term in gastro_waiting) and request.policy_tenure_months < 24:
+        # Gastrointestinal (Hernia, Fistula, Piles, etc.)
+        gastro_waiting = ["hernia", "fistula", "piles", "haemorrhoids", "hemorrhoids"]
+        if category == "gastrointestinal treatment" or match_waiting_condition(text_lower, gastro_waiting):
+            if match_waiting_condition(text_lower, gastro_waiting) and request.policy_tenure_months < 24:
                 state.update(
                     recommendation=Recommendation.REJECT.value,
                     reason=f"{request.procedure_name} is subject to a 24-month Code-Excl02 waiting period.",
                     indicative_limit=0.0,
                 )
-                state["citations"] = _build_citations(combined[:3])
+                state["citations"] = _build_citations(restrictive[:3])
                 state["current_agent"] = cls.name
                 state["current_status"] = "COMPLETED"
                 state["steps"] = state.get("steps", 0) + 1
                 state.setdefault("step_timings", {})["coverage_verification"] = round(time.time() - start, 4)
                 return state
 
-        # ENT
-        if category == "ENT treatment":
-            ent_waiting = {"tonsillectomy", "sinusitis", "adenoidectomy"}
-            if any(term in text_lower for term in ent_waiting) and request.policy_tenure_months < 24:
+        # ENT (Tonsillectomy, Sinusitis, etc.)
+        ent_waiting = ["tonsillectomy", "sinusitis", "adenoidectomy", "fess", "septoplasty"]
+        if category == "ENT treatment" or match_waiting_condition(text_lower, ent_waiting):
+            if match_waiting_condition(text_lower, ent_waiting) and request.policy_tenure_months < 24:
                 state.update(
                     recommendation=Recommendation.REJECT.value,
                     reason=f"{request.procedure_name} is subject to a 24-month Code-Excl02 waiting period.",
                     indicative_limit=0.0,
                 )
-                state["citations"] = _build_citations(combined[:3])
+                state["citations"] = _build_citations(restrictive[:3])
                 state["current_agent"] = cls.name
                 state["current_status"] = "COMPLETED"
                 state["steps"] = state.get("steps", 0) + 1
                 state.setdefault("step_timings", {})["coverage_verification"] = round(time.time() - start, 4)
                 return state
 
-        # Renal stone / Lithotripsy
-        if category == "renal treatment":
-            renal_waiting = {"lithotripsy", "kidney stone", "ureteric stone", "urolithiasis", "eswl", "calculus"}
-            if any(term in text_lower for term in renal_waiting) and request.policy_tenure_months < 24:
-                state.update(
-                    recommendation=Recommendation.REJECT.value,
-                    reason="Kidney/ureteric stone treatment is subject to a 24-month Code-Excl02 waiting period.",
-                    indicative_limit=0.0,
-                )
-                state["citations"] = _build_citations(combined[:3])
-                state["current_agent"] = cls.name
-                state["current_status"] = "COMPLETED"
-                state["steps"] = state.get("steps", 0) + 1
-                state.setdefault("step_timings", {})["coverage_verification"] = round(time.time() - start, 4)
-                return state
-
-        # Urology
-        if category == "urology treatment":
-            uro_waiting = {"lithotripsy", "hydrocele", "kidney stone", "ureteric stone", "urolithiasis", "eswl"}
-            if any(term in text_lower for term in uro_waiting) and request.policy_tenure_months < 24:
-                state.update(
-                    recommendation=Recommendation.REJECT.value,
-                    reason="Procedure subject to 24-month Code-Excl02 waiting period.",
-                    indicative_limit=0.0,
-                )
-                state["citations"] = _build_citations(combined[:3])
-                state["current_agent"] = cls.name
-                state["current_status"] = "COMPLETED"
-                state["steps"] = state.get("steps", 0) + 1
-                state.setdefault("step_timings", {})["coverage_verification"] = round(time.time() - start, 4)
-                return state
+        # Renal stone / Lithotripsy / Calculus / Urology Code-Excl02
+        renal_waiting = [
+            "lithotripsy", "kidney stone", "kidney stones", "ureteric stone",
+            "ureteric stones", "urolithiasis", "eswl", "calculus", "calculi",
+            "hydrocele", "turp", "prostate",
+        ]
+        if match_waiting_condition(text_lower, renal_waiting) and request.policy_tenure_months < 24:
+            state.update(
+                recommendation=Recommendation.REJECT.value,
+                reason="Kidney/ureteric stone treatment is subject to a 24-month Code-Excl02 waiting period.",
+                indicative_limit=0.0,
+            )
+            state["citations"] = _build_citations(restrictive[:3])
+            state["current_agent"] = cls.name
+            state["current_status"] = "COMPLETED"
+            state["steps"] = state.get("steps", 0) + 1
+            state.setdefault("step_timings", {})["coverage_verification"] = round(time.time() - start, 4)
+            return state
 
         # Orthopedic joint replacement
-        if category == "orthopedic treatment":
-            ortho_waiting = {"joint replacement", "knee replacement", "hip replacement"}
-            if any(term in text_lower for term in ortho_waiting) and request.policy_tenure_months < 24:
+        ortho_waiting = ["joint replacement", "knee replacement", "hip replacement", "arthroplasty"]
+        if category == "orthopedic treatment" or match_waiting_condition(text_lower, ortho_waiting):
+            if match_waiting_condition(text_lower, ortho_waiting) and request.policy_tenure_months < 24:
                 state.update(
                     recommendation=Recommendation.REJECT.value,
                     reason="Joint replacement surgery is subject to a 24-month Code-Excl02 waiting period.",
                     indicative_limit=0.0,
                 )
-                state["citations"] = _build_citations(combined[:3])
+                state["citations"] = _build_citations(restrictive[:3])
                 state["current_agent"] = cls.name
                 state["current_status"] = "COMPLETED"
                 state["steps"] = state.get("steps", 0) + 1

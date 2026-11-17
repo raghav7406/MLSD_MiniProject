@@ -45,12 +45,15 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/preauth/$taskId"
 
 | Service | URL |
 |---|---|
+| Streamlit demo UI | http://localhost:8501 |
 | API + Swagger | http://localhost:8000/docs |
+| Jaeger UI | http://localhost:16686 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (admin/admin) |
 
-For the complete presentation sequence, including all demo cases, polling,
-feedback, traces, evaluation, and load testing, see
+Open the Streamlit UI for the primary presentation demo. For the complete
+presentation sequence, including all demo cases, polling, feedback, traces,
+evaluation, and load testing, see
 [docs/RUNBOOK.md](./docs/RUNBOOK.md#5-final-presentation-demo).
 
 ---
@@ -77,22 +80,25 @@ FastAPI REST API (src/services/api.py)
   ├── Rate Limiter (20 req/min per client; X-Client-ID or source IP)
   ├── Result Cache (5-min TTL)
   ├── Pydantic Validation → Quarantine (data/quarantine_records.json)
+  ├── OpenTelemetry Instrumentation (preauth.submit, W3C traceparent injection)
   └── Celery/Redis Queue ─────────────────────┐
                                               ▼
                                     Worker (src/services/worker.py)
+                                     (preauth.workflow, context extraction)
                                               │
                                               ▼
-                                    Agent Graph (src/agents/graph.py)
+                                    Agent Graph (LangGraph / Legacy)
                                      ┌── Node 1: Input Guardrails
                                      ├── Node 2: Clinical Agent
-                                     ├── Node 3: Coverage Agent (5-pass retrieval)
+                                     ├── Node 3: Coverage Agent (Semantic Retrieval + Tools)
                                      ├── Node 4: Verification Agent
-                                     └── Node 5: Verification Retry
+                                     └── Node 5: Verification Retry (Alternate Search)
                                               │
                                               ▼
                                     PreAuthResponse → results.json
                                               │
                                     Prometheus /metrics → Grafana
+                                    OpenTelemetry Spans → Jaeger UI
 ```
 
 ---
@@ -153,8 +159,17 @@ Response:
 ## Testing and Evaluation
 
 ```powershell
-# Unit, API, and agent architecture tests (78 tests)
+# Unit, API, LangGraph, semantic retrieval, and tracing tests (94 tests)
 python -m pytest -q
+
+# Run with LangGraph runtime
+$env:AGENT_RUNTIME="langgraph"; python -m pytest -q
+
+# Run with Semantic Retrieval enabled
+$env:SEMANTIC_RETRIEVAL_ENABLED="true"; python -m pytest -q
+
+# Run with OpenTelemetry Tracing enabled
+$env:OTEL_ENABLED="true"; python -m pytest -q
 
 # Evaluation suite (25 cases, 4 metrics)
 python -m eval.evaluate_rag --report results/evaluation.json
@@ -200,7 +215,8 @@ docker compose up --scale worker=3
 │   │   ├── clinical_agent.py      # Classification node
 │   │   ├── coverage_agent.py      # Retrieval + decision node
 │   │   ├── verification.py        # Citation grounding node
-│   │   ├── graph.py               # Workflow orchestration & explicit routing
+│   │   ├── graph.py               # Workflow orchestration & runtime selector
+│   │   ├── langgraph_runtime.py   # LangGraph compiled StateGraph adapter
 │   │   ├── state.py               # AgentState TypedDict & data models
 │   │   ├── tools.py               # corpus_search, clause_lookup, field_lookup, execute_tool
 │   │   └── trace_formatter.py     # Live demonstration trace generator
@@ -210,15 +226,18 @@ docker compose up --scale worker=3
 │   │   └── prompt_guard.py        # Injection detection, output filter, grounding
 │   ├── ingestion/
 │   │   ├── chunker.py             # Text splitting + clause_id extraction
-│   │   ├── vector_store.py        # Token-overlap search + clause lookup
+│   │   ├── embedding.py           # EmbeddingProvider & LocalSemanticEmbeddingProvider
+│   │   ├── vector_store.py        # Semantic + lexical search + exact clause lookup
 │   │   └── ingest_pipeline.py     # CLI ingestor with manifest + idempotency
+│   ├── observability/
+│   │   └── tracing.py             # OpenTelemetry TracerProvider, spans & context propagation
 │   └── services/
-│       ├── api.py                 # FastAPI endpoints + Prometheus
+│       ├── api.py                 # FastAPI endpoints + Prometheus + trace context
 │       ├── cache.py               # In-memory result cache
 │       ├── circuit_breaker.py     # Provider circuit breaker
 │       ├── rate_limiter.py        # Per-client rate limiting
 │       ├── quarantine.py          # Invalid payload persistence
-│       └── worker.py              # Celery task + local fallback
+│       └── worker.py              # Celery task + local fallback + persistence trace
 ├── tests/
 │   ├── conftest.py                # Temp-dir isolation fixture
 │   ├── test_agent_architecture.py # Agent boundaries, tools, and transition tests
@@ -226,7 +245,10 @@ docker compose up --scale worker=3
 │   ├── test_contracts.py          # Schema validation tests
 │   ├── test_guardrails.py         # Guardrail tests
 │   ├── test_ingestion.py          # Ingestion + retrieval tests
+│   ├── test_langgraph_runtime.py  # LangGraph compilation, bounds, and parity tests
 │   ├── test_rate_limiter.py       # Rate limiter sliding window tests
+│   ├── test_semantic_retrieval.py # Semantic retrieval and embedding tests
+│   ├── test_tracing.py            # OpenTelemetry context propagation & PHI safety tests
 │   └── test_workflow.py           # End-to-end workflow tests
 ├── docs/
 │   ├── REPORT.md                  # Final report
@@ -246,11 +268,9 @@ docker compose up --scale worker=3
 
 This is an academic prototype. Known limitations:
 
-- **Token-overlap retrieval** (not semantic) – may miss paraphrased policy text
-- **Deterministic rules only** – no LLM for free-text ambiguity
-- **In-process result store** – not durable across restarts (mitigated by JSON file)
+- **Deterministic decision engine** – uses explicit clinical and coverage policy rules rather than generative LLM reasoning to ensure zero hallucinations and 100% auditability
+- **In-process result store** – not durable across container restarts without volume persistence (mitigated by JSON file persistence)
 - **Simplified policy corpus** – 2 policy documents, illustrative clauses only
-- **No authentication** – rate limiting only; no JWT/API keys
-- **No OpenTelemetry tracing** – run_id-based log correlation instead
+- **Authentication/authorisation** – rate limiting and client identification in place; OAuth2/JWT documented as production requirement
 
 See [docs/REPORT.md](./docs/REPORT.md) §11 for the full limitations table.

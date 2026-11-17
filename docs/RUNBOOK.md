@@ -5,8 +5,10 @@
 | Service | Port | Purpose |
 |---|---|---|
 | API (`app`) | 8000 | FastAPI REST endpoints, metrics |
+| Client (`client`) | 8501 | Streamlit presentation UI |
 | Worker | — | Celery task executor |
 | Redis | 6379 | Broker and result backend |
+| Jaeger | 16686 / 4318 | Distributed tracing UI & OTLP collector |
 | Prometheus | 9090 | Metrics scraping |
 | Grafana | 3000 | Dashboards |
 
@@ -27,6 +29,9 @@ docker compose up --build
 
 # 4. Verify health
 Invoke-RestMethod http://localhost:8000/health
+
+# 5. Open the Streamlit demo UI
+Start-Process http://localhost:8501
 ```
 
 Expected response:
@@ -137,6 +142,7 @@ Invoke-RestMethod http://localhost:8000/health
 
 Open these pages for the presentation:
 
+- Streamlit demo UI: `http://localhost:8501`
 - Swagger: `http://localhost:8000/docs`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
@@ -276,16 +282,48 @@ measured 4.18 RPS and 54 ms p95; three workers measured 5.04 RPS and 55 ms
 p95, with zero failures in both runs. These are aggregate HTTP request
 statistics from the Locust submit-and-poll scenario.
 
-### 5.8 Recommended presentation order
+### 5.8 OpenTelemetry Distributed Tracing & Runtime Switching
 
-1. `/health`, Swagger, and the architecture diagram.
-2. 11-month cataract rejection with the waiting-period citation.
-3. 24-month cataract approval with the indicative limit.
-4. Malformed request and HTTP 422 quarantine behavior.
-5. Unsupported procedure and prompt-injection escalation.
-6. One saved trace showing verification retry and escalation.
-7. Feedback, `/metrics`, and Grafana.
-8. 25-case evaluation and final Locust scaling results.
+#### View Traces in Jaeger UI:
+1. Open the Jaeger UI at `http://localhost:16686`.
+2. Under **Service**, select `preauth-api` or `preauth-worker`.
+3. In **Tags**, filter by `preauth.run_id=<run_id>` to inspect the end-to-end trace spanning:
+   - `preauth.submit` (FastAPI intake + W3C header injection)
+   - `preauth.workflow` (Celery worker execution context)
+   - `preauth.guardrail`, `preauth.agent.clinical`, `preauth.agent.coverage`, `preauth.agent.verification`
+   - Child tool spans: `preauth.tool.corpus_search`, `preauth.tool.clause_lookup`
+   - `preauth.result.persist` (atomic file persistence)
+4. Notice that no PHI or patient medical text is attached to trace spans (strict allowlist enforcement).
+
+#### Switching Agent Runtimes:
+To switch between the compiled LangGraph runtime and legacy state machine:
+```powershell
+# Set runtime to LangGraph:
+$env:AGENT_RUNTIME="langgraph"
+python -m pytest -q tests/test_langgraph_runtime.py
+
+# Switch back to legacy:
+$env:AGENT_RUNTIME="legacy"
+python -m pytest -q
+```
+
+#### Toggling Semantic Retrieval:
+```powershell
+# Enable semantic embedding retrieval:
+$env:SEMANTIC_RETRIEVAL_ENABLED="true"
+python -m eval.evaluate_rag --report results/evaluation.json
+```
+
+### 5.9 Recommended presentation order
+
+1. Streamlit UI, `/health`, Swagger, and the architecture diagram.
+2. Select the 11-month cataract preset and show the waiting-period citation.
+3. Select the 24-month cataract preset and show the indicative limit.
+4. Use the custom form for malformed request and HTTP 422 quarantine behavior.
+5. Select unsupported procedure and prompt-injection presets.
+6. Show the result evidence, saved trace, and verification retry/escalation.
+7. Submit reviewer feedback, then show `/metrics` and Grafana.
+8. Show the 25-case evaluation and final Locust scaling results.
 
 Stop the stack after the demonstration:
 
